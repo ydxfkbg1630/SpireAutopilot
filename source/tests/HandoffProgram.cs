@@ -21,4 +21,16 @@ Check(!policy.Observe("battle-c", "Model", false, 0, false, false) && policy.Use
 Check(!policy.Observe("battle-c", "Hybrid", true, 0, false, false) && !policy.UsesModel, "explicit mode change starts a fresh policy");
 policy.Observe("battle-c", "Hybrid", true, 31, false, false); policy.Reset();
 Check(!policy.UsesModel, "explicit reset releases model latch");
+foreach (double seconds in new[] { 1d, 10d, 30d, 90d, 600d })
+{
+    policy.Reset();
+    Check(!policy.Observe("custom", "Hybrid", true, seconds - .001, false, false, seconds), "custom threshold waits " + seconds);
+    Check(policy.Observe("custom", "Hybrid", true, seconds, false, false, seconds), "custom threshold triggers " + seconds);
+}
+foreach (double invalid in new[] { 0d, -1d, 601d, double.NaN, double.PositiveInfinity })
+{
+    policy.Reset();
+    Check(!policy.Observe("invalid", "Hybrid", true, 29.999, false, false, invalid), "invalid threshold uses default");
+    Check(policy.Observe("invalid", "Hybrid", true, 30, false, false, invalid), "invalid threshold falls back to 30");
+}
 Console.WriteLine($"Handoff policy checks passed: {passed}");

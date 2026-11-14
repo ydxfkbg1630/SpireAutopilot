@@ -148,6 +148,7 @@ public partial class AutopilotHost : Node
         panel.BeginCurrent(owner, phase, key);
     }
     private bool ModelControlsCombat => config.CombatMode == "Model" || config.CombatMode == "Hybrid" && handoff.UsesModel;
+    private double SolverWaitSeconds => CombatHandoffPolicy.NormalizeTimeout(config.HybridSolverTimeoutSeconds);
 
     private void UpdateCombatControl()
     {
@@ -156,7 +157,7 @@ public partial class AutopilotHost : Node
         bool ownedByModel = handoff.UsesModel;
         var search = SolverSearchStatusCapture.Capture();
         bool switched = handoff.Observe(battleId, config.CombatMode, search.IsRunning,
-            search.ElapsedSeconds, search.ComputationCompleted, search.IsDeploying);
+            search.ElapsedSeconds, search.ComputationCompleted, search.IsDeploying, SolverWaitSeconds);
         if (config.CombatMode == "Hybrid" && ownedByModel && !handoff.UsesModel)
             SolverModelOwnership.Release();
         if (!switched) return;
@@ -165,9 +166,9 @@ public partial class AutopilotHost : Node
         lastActionToken = null;
         retryToken = null;
         retryCount = 0;
-        BeginCurrent("模型", "求解满 30 秒，模型接管", "handoff:" + battleId);
+        BeginCurrent("模型", $"求解满 {SolverWaitSeconds:0} 秒，模型接管", "handoff:" + battleId);
         panel.SetCurrentDetails("正在结束本次求解，随后评估当前手牌、药水和敌人意图。");
-        Record("本次求解达到 30 秒，本场后续由模型出牌并评估药水；下一场重新使用求解器。");
+        Record($"本次求解达到 {SolverWaitSeconds:0} 秒，本场后续由模型出牌并评估药水；下一场重新使用求解器。");
     }
     private void UpdatePresentation()
     {
@@ -180,7 +181,7 @@ public partial class AutopilotHost : Node
             {
                 var search = SolverSearchStatusCapture.Capture();
                 if (search.IsRunning) progress = progress with
-                { ElapsedSeconds = search.ElapsedSeconds, Detail = "本次求解满 30 秒时交给模型。" };
+                { ElapsedSeconds = search.ElapsedSeconds, Detail = $"本次求解满 {SolverWaitSeconds:0} 秒时交给模型。" };
             }
             panel.SetSolverProgress(progress);
             return;

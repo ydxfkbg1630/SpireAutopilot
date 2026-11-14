@@ -23,6 +23,7 @@ public sealed class AutopilotConfig
     public double DecisionDelaySeconds { get; set; } = 1;
     public bool AutoCombat { get; set; } = true;
     public string CombatMode { get; set; } = "Hybrid";
+    public int HybridSolverTimeoutSeconds { get; set; } = 30;
     public bool ReflectAfterCombat { get; set; } = true;
     public bool UseBattleExperience { get; set; } = true;
     public int SolverWorkerLimit { get; set; }

@@ -355,13 +355,16 @@ await Test("configuration roundtrip with Windows user credential", () =>
     var path = Path.Combine(dir, "config.json");
     try
     {
-        var config = Config(); config.Strategy = "保持生命"; config.DecisionDelaySeconds = 1.5;
+        var config = Config(); config.Strategy = "保持生命"; config.DecisionDelaySeconds = 1.5; config.HybridSolverTimeoutSeconds = 75;
         config.Save(path);
         var saved = File.ReadAllText(path);
         Check(!saved.Contains(config.ApiKey), "secret encrypted at rest");
         Check(saved.Contains("ApiKeyProtected"), "encrypted field");
         var loaded = AutopilotConfig.Load(path);
         Check(loaded.ApiKey == config.ApiKey && loaded.Strategy == config.Strategy && loaded.DecisionDelaySeconds == 1.5, "roundtrip");
+        Check(loaded.HybridSolverTimeoutSeconds == 75, "custom solver wait persists");
+        File.WriteAllText(Path.Combine(dir, "legacy.json"), "{}");
+        Check(AutopilotConfig.Load(Path.Combine(dir, "legacy.json")).HybridSolverTimeoutSeconds == 30, "older configurations default to thirty seconds");
         config.ApiKey = ""; config.Save(path);
         Check(AutopilotConfig.Load(path).ApiKey == "", "clear key");
         Check(AutopilotConfig.Load(Path.Combine(dir, "absent.json")).RequestTimeoutSeconds == 45, "default config");

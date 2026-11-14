@@ -7,7 +7,10 @@ public sealed class CombatHandoffPolicy
     private string? battle;
     private string? currentMode;
     public bool UsesModel { get; private set; }
-    public bool Observe(string? battleId, string mode, bool searching, double elapsedSeconds, bool completed, bool deploying)
+    public static double NormalizeTimeout(double seconds)
+        => double.IsFinite(seconds) && seconds >= 1 && seconds <= 600 ? seconds : SearchTimeoutSeconds;
+    public bool Observe(string? battleId, string mode, bool searching, double elapsedSeconds, bool completed, bool deploying,
+        double timeoutSeconds = SearchTimeoutSeconds)
     {
         if (battleId != battle || mode != currentMode)
         {
@@ -16,7 +19,7 @@ public sealed class CombatHandoffPolicy
             UsesModel = battleId != null && mode == "Model";
         }
         if (battleId == null || mode != "Hybrid" || UsesModel || !searching || completed || deploying
-            || !double.IsFinite(elapsedSeconds) || elapsedSeconds < SearchTimeoutSeconds) return false;
+            || !double.IsFinite(elapsedSeconds) || elapsedSeconds < NormalizeTimeout(timeoutSeconds)) return false;
         UsesModel = true;
         return true;
     }

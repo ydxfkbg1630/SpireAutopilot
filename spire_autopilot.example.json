@@ -21,5 +21,6 @@
   "ApiKeyProtected": "",
   "CombatMode": "Hybrid",
   "ReflectAfterCombat": true,
-  "UseBattleExperience": true
+  "UseBattleExperience": true,
+  "HybridSolverTimeoutSeconds": 30
 }
