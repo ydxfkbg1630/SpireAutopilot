@@ -10,6 +10,7 @@ public partial class AutopilotHost : Node
     private string? observedBattle;
     private int reflectionFailures;
     private readonly CombatBridge combat = new();
+    private readonly CombatHandoffPolicy handoff = new();
     private readonly GameAdapter game = new();
     private readonly DecisionContext decisionContext = new();
     private RoutePlanner route = null!;
@@ -28,6 +29,7 @@ public partial class AutopilotHost : Node
     private double clock;
     private double nextPoll;
     private double nextPresentation;
+    private double nextCombatControl;
     private double modelStartedAt;
     private bool modelThinking;
     private bool isolatedProbe;
@@ -54,6 +56,8 @@ public partial class AutopilotHost : Node
             _ = SolverSettingsProbe.RunAsync(this, settingsProbe);
         else if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_MODEL_COMBAT_PROBE")))
             _ = ModelCombatProbe.RunAsync(this);
+        else if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_HYBRID_PROBE")))
+            _ = HybridCombatProbe.RunAsync(this);
         else if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_SCENE_PROBE")))
             _ = SceneProbe.RunAsync(this);
         else if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_PROBE")))
@@ -69,6 +73,12 @@ public partial class AutopilotHost : Node
     public override void _Process(double delta)
     {
         clock += delta;
+        if (enabled && !exiting && clock >= nextCombatControl)
+        {
+            nextCombatControl = clock + .1;
+            try { UpdateCombatControl(); }
+            catch (Exception ex) { Pause("战斗接管需要处理：" + ex.Message); }
+        }
         if ((enabled || isolatedProbe) && !exiting && clock >= nextPresentation)
         {
             nextPresentation = clock + .2;
@@ -84,6 +94,7 @@ public partial class AutopilotHost : Node
         provider.ResetSession();
         reflectionProvider.ResetSession();
         decisionContext.Reset();
+        handoff.Reset();
         config = value;
         config.Save(ConfigPath);
     }
@@ -96,10 +107,12 @@ public partial class AutopilotHost : Node
         { SetStatus("请填写接口 URL 和模型名。"); panel.ShowPanel(); return; }
         enabled = true;
         reflectionFailures = 0;
+        SolverSearchStatusCapture.EnsureInstalled();
+        UpdateCombatControl();
         SolverPresentation.WorkerLimit = config.SolverWorkerLimit;
         SolverPresentation.MaxSpeed = config.SolverMaxSpeed;
         SolverPresentation.LightweightDiagnostics = config.LightweightSolverDiagnostics;
-        if (config.AutoCombat && config.CombatMode == "Model") { combat.PrepareOwnership(); SolverModelOwnership.Activate(); }
+        if (config.AutoCombat && ModelControlsCombat) { combat.PrepareOwnership(); SolverModelOwnership.Activate(); }
         else if (config.AutoCombat) combat.PrepareOwnership();
         panel.ShowMonitor();
         generation++;
@@ -132,13 +145,42 @@ public partial class AutopilotHost : Node
         presentationKey = key;
         panel.BeginCurrent(owner, phase, key);
     }
+    private bool ModelControlsCombat => config.CombatMode == "Model" || config.CombatMode == "Hybrid" && handoff.UsesModel;
+
+    private void UpdateCombatControl()
+    {
+        if (!config.AutoCombat) { handoff.Reset(); return; }
+        string? battleId = game.InCombat ? game.CombatIdentity : null;
+        bool ownedByModel = handoff.UsesModel;
+        var search = SolverSearchStatusCapture.Capture();
+        bool switched = handoff.Observe(battleId, config.CombatMode, search.IsRunning,
+            search.ElapsedSeconds, search.ComputationCompleted, search.IsDeploying);
+        if (config.CombatMode == "Hybrid" && ownedByModel && !handoff.UsesModel)
+            SolverModelOwnership.Release();
+        if (!switched) return;
+        combat.PrepareOwnership();
+        SolverModelOwnership.Activate();
+        lastActionToken = null;
+        retryToken = null;
+        retryCount = 0;
+        BeginCurrent("模型", "求解满 20 秒，模型接管", "handoff:" + battleId);
+        panel.SetCurrentDetails("正在结束本次求解，随后评估当前手牌、药水和敌人意图。");
+        Record("本次求解达到 20 秒，本场后续由模型出牌并评估药水；下一场重新使用求解器。");
+    }
     private void UpdatePresentation()
     {
-        if (game.InCombat && config.CombatMode != "Model")
+        if (game.InCombat && !ModelControlsCombat)
         {
             modelThinking = false;
             presentationOwner = "战斗";
-            panel.SetSolverProgress(combat.GetProgress());
+            var progress = combat.GetProgress();
+            if (config.CombatMode == "Hybrid" && progress.Mode == "search")
+            {
+                var search = SolverSearchStatusCapture.Capture();
+                if (search.IsRunning) progress = progress with
+                { ElapsedSeconds = search.ElapsedSeconds, Detail = "本次求解满 20 秒时交给模型。" };
+            }
+            panel.SetSolverProgress(progress);
             return;
         }
         if (presentationOwner == "战斗") BeginCurrent("领航", "等待下一个场景", "combat-ended");
@@ -212,6 +254,7 @@ public partial class AutopilotHost : Node
         pending = cts;
         try
         {
+            UpdateCombatControl();
             if (config.ReflectAfterCombat && game.InCombat && game.CaptureCombatObservation() is { } observation)
             {
                 string id = game.CombatIdentity ?? "combat";
@@ -262,14 +305,20 @@ public partial class AutopilotHost : Node
                 SolverPresentation.WorkerLimit = config.SolverWorkerLimit;
                 SolverPresentation.MaxSpeed = config.SolverMaxSpeed;
                 SolverPresentation.LightweightDiagnostics = config.LightweightSolverDiagnostics;
-                if (config.AutoCombat && config.CombatMode == "Model") { combat.PrepareOwnership(); SolverModelOwnership.Activate(); }
+                if (config.AutoCombat && ModelControlsCombat)
+                {
+                    combat.PrepareOwnership();
+                    SolverModelOwnership.Activate();
+                    if (!SolverSearchStatusCapture.Capture().IsQuiescent)
+                    { SetStatus("模型接管中：等待求解器完成原生任务交接。"); return; }
+                }
                 else if (config.AutoCombat)
                     SetStatus(combat.TryEnsureAutomaticCombat(true) ? "战斗由 CombatSolver 自动执行。" : combat.Status);
                 else SetStatus("战斗阶段：等待手动或求解器执行。");
-                if (!config.AutoCombat || config.CombatMode != "Model") return;
+                if (!config.AutoCombat || !ModelControlsCombat) return;
             }
             game.AllowNativeUiFallback = config.AllowNativeUiFallback;
-            bool combatDecision = game.InCombat && config.CombatMode == "Model";
+            bool combatDecision = game.InCombat && ModelControlsCombat;
             DecisionFrame? frame = combatDecision ? game.CaptureCombatFrame() : game.Capture();
             if (frame is null)
             {
@@ -385,7 +434,7 @@ public partial class AutopilotHost : Node
     }
     private void SetCurrentUsage(ProviderUsage? usage)
     {
-        if ((!game.InCombat || config.CombatMode == "Model") && usage != null)
+        if ((!game.InCombat || ModelControlsCombat) && usage != null)
         {
             string cache = usage is { PromptTokens: > 0, CachedTokens: >= 0 } ? $"  ·  缓存 {100d * usage.CachedTokens / usage.PromptTokens:F0}%" : "";
             panel.SetCurrentMetrics($"本次 {usage.ElapsedMilliseconds / 1000d:F1}s{cache}");

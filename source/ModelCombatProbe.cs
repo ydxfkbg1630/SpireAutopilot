@@ -5,8 +5,10 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Models;
+using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Ftue;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
@@ -26,6 +28,7 @@ public static class ModelCombatProbe
         if (string.IsNullOrWhiteSpace(output) || string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_PROBE"))) return;
         Directory.CreateDirectory(output);
         bool useModel = System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_MODEL_COMBAT_USE_MODEL") == "1";
+        bool potionFixture = System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_MODEL_COMBAT_POTION_FIXTURE") == "1";
         using var provider = new ProviderClient();
         using var lifetime = new CancellationTokenSource(TimeSpan.FromSeconds(180));
         var timer = Stopwatch.StartNew(); var adapter = new GameAdapter(); var trace = new List<object>(); var checks = new List<string>();
@@ -73,6 +76,34 @@ public static class ModelCombatProbe
                             if (!json.Contains('"' + key + '"')) throw new InvalidOperationException("Missing combat context: " + key);
                         checks.Add("combat_context_complete");
                         Write("first-combat-frame.json", frame);
+                        if (potionFixture)
+                        {
+                            var live = CombatManager.Instance.DebugOnlyGetState()!;
+                            var owner = LocalContext.GetMe(live)!;
+                            var potion = ModelDb.Potion<FirePotion>().ToMutable();
+                            await PotionCmd.TryToProcure(potion, owner);
+                            DecisionFrame? potionFrame = null;
+                            while (potionFrame == null) { await NextFrame(); potionFrame = adapter.CaptureCombatFrame(); }
+                            var potionActions = potionFrame.Actions.Where(a => a.Kind == "use_potion" && JsonSerializer.Serialize(a.Details).Contains("FIRE_POTION")).ToArray();
+                            if (potionActions.Length != live.Enemies.Count(c => c.IsAlive)) throw new InvalidOperationException("Fire potion should expose exactly every living enemy target.");
+                            var enemy = live.Enemies.Where(c => c.IsAlive).OrderByDescending(c => c.CurrentHp).First();
+                            var potionAction = potionActions.Single(a => JsonSerializer.SerializeToElement(a.Details).GetProperty("targetId").GetString() == enemy.CombatId.ToString());
+                            var detail = JsonSerializer.SerializeToElement(potionAction.Details);
+                            if (detail.GetProperty("potion").GetProperty("description").GetString() is not { Length: > 0 } || detail.GetProperty("targetType").GetString() != "AnyEnemy") throw new InvalidOperationException("Potion context needs native effect and targeting semantics.");
+                            int beforeHp = enemy.CurrentHp, slot = Array.IndexOf(owner.PotionSlots.ToArray(), potion);
+                            if (slot < 0) throw new InvalidOperationException("Native potion procurement needs a real belt slot.");
+                            Write("potion-before.json", potionFrame);
+                            await adapter.ExecuteCombatAsync(potionFrame.Token, potionAction.Id);
+                            DecisionFrame? after = null;
+                            while (after == null || ReferenceEquals(owner.PotionSlots[slot], potion) || enemy.CurrentHp == beforeHp)
+                            { await NextFrame(); after = adapter.CaptureCombatFrame(); }
+                            if (after.Actions.Any(a => a.Kind == "use_potion" && JsonSerializer.Serialize(a.Details).Contains("FIRE_POTION"))) throw new InvalidOperationException("Consumed potion should leave the legal action list.");
+                            checks.Add("native_potion_targets_and_effect_context"); checks.Add("native_potion_damage_and_slot_consumption"); checks.Add("consumed_potion_removed_from_legal_actions");
+                            Write("potion-after.json", after);
+                            Write("result.json", new { success = true, providerApiCalls = 0, potionFixture = true, slot, beforeHp, afterHp = enemy.CurrentHp, actualDamage = beforeHp - enemy.CurrentHp,
+                                slotConsumed = !ReferenceEquals(owner.PotionSlots[slot], potion), legalTargets = potionActions.Length, checks, elapsedSeconds = timer.Elapsed.TotalSeconds });
+                            return;
+                        }
                         experience.BeginBattle(adapter.RunIdentity ?? "probe-run", adapter.CombatIdentity!, adapter.CaptureCombatObservation()!);
                         route.Observe(frame, "原生测试");
                         var preparedContext = context.Prepare(frame, route, Array.Empty<string>());

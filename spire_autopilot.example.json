@@ -19,7 +19,7 @@
   "ThinkingEnabled": false,
   "UseJsonMode": true,
   "ApiKeyProtected": "",
-  "CombatMode": "Solver",
+  "CombatMode": "Hybrid",
   "ReflectAfterCombat": true,
   "UseBattleExperience": true
 }

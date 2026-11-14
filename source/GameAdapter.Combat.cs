@@ -98,7 +98,8 @@ public sealed partial class GameAdapter
                 {
                     if (!potion.IsValidTarget(target)) continue;
                     var localTarget = target;
-                    CombatAdd("potion:" + slot + ":" + TargetId(target), "使用" + ModelTitle(potion) + TargetLabel(target), "use_potion", new { slot, potion = SnapshotModel(potion), targetId = TargetId(target) }, () => potion.EnqueueManualUse(localTarget));
+                    CombatAdd("potion:" + slot + ":" + TargetId(target), "使用" + ModelTitle(potion) + TargetLabel(target), "use_potion", new
+                    { slot, potion = SnapshotModel(potion), usage = potion.Usage.ToString(), targetType = potion.TargetType.ToString(), targetId = TargetId(target), target = target == null ? null : CombatCreature(target) }, () => potion.EnqueueManualUse(localTarget));
                 }
             }
             CombatAdd("end_turn", "结束当前回合", "end_turn", new { turn = player.PlayerCombatState.TurnNumber }, () =>
