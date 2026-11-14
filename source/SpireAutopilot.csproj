@@ -7,7 +7,7 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <GameData Condition="'$(GameData)' == ''">$(STS2_GAME_DATA)</GameData>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <Version>0.5.0</Version>
+    <Version>0.5.1</Version>
   </PropertyGroup>
   <Target Name="CheckGameData" BeforeTargets="ResolveAssemblyReferences"><Error Condition="!Exists('$(GameData)/sts2.dll')" Text="Set GameData or STS2_GAME_DATA to the installed game data_sts2_windows_x86_64 directory." /></Target>
   <ItemGroup>

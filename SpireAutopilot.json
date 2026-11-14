@@ -3,7 +3,7 @@
   "name": "尖塔全程领航",
   "author": "ydxfkbg1630",
   "description": "STS2 Solver优先，120秒后由CombatSolver接管；模型仅负责局外决策与整局经验。",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": true,
@@ -12,7 +12,7 @@
     {
       "workshop_id": "3834819227",
       "min_version": "0.1.0",
-      "id": "STS2Solver"
+      "id": "Sts2Solver"
     },
     {
       "workshop_id": "3790899961",
