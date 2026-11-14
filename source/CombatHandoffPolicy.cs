@@ -3,7 +3,7 @@ namespace SpireAutopilot;
 /// <summary>One-way ownership transition within a battle; the next battle starts fresh.</summary>
 public sealed class CombatHandoffPolicy
 {
-    public const double SearchTimeoutSeconds = 20;
+    public const double SearchTimeoutSeconds = 30;
     private string? battle;
     private string? currentMode;
     public bool UsesModel { get; private set; }

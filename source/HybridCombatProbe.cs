@@ -74,8 +74,8 @@ public static class HybridCombatProbe
                         if (!switched)
                         {
                             switched = true;
-                            if (status.ElapsedSeconds is > 0 and < 19.8) throw new InvalidOperationException("Handoff happened before 20 seconds of actual computation.");
-                            assertions.Add("actual_twenty_second_handoff");
+                            if (status.ElapsedSeconds > 0 && status.ElapsedSeconds < CombatHandoffPolicy.SearchTimeoutSeconds - .2) throw new InvalidOperationException("Handoff happened before 30 seconds of actual computation.");
+                            assertions.Add("actual_thirty_second_handoff");
                         }
                         if (!status.IsQuiescent) continue;
                         quiescent = true;

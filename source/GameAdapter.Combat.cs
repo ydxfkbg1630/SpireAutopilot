@@ -125,7 +125,7 @@ public sealed partial class GameAdapter
         var stable = JsonSerializer.Serialize(new { state, actions });
         string token = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(stable)));
         Status = "可决策：" + (selection ? screenType : "Combat");
-        return new DecisionFrame(token, selection ? screenType : "Combat", state, actions.ToArray());
+        return new DecisionFrame(token, selection ? screenType : "Combat", state, actions.ToArray(), IsCombatDecision: true);
     }
 
     public Task ExecuteCombatAsync(string token, string actionId)

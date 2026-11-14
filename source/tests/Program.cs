@@ -203,6 +203,25 @@ await Test("explicit thinking extension respects protocol and default", async ()
     }
 });
 
+await Test("combat requests enable thinking across both protocols and choice scenes", async () =>
+{
+    foreach (var responses in new[] { false, true })
+    foreach (string scene in new[] { "Combat", "HandCardSelect", "NCombatPileCardSelectScreen" })
+    {
+        var config = Config(); config.ThinkingEnabled = false; config.ApiMode = responses ? "Responses" : "ChatCompletions";
+        using var http = new HttpClient(new FakeHandler(async (request, ct) =>
+        {
+            using var doc = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+            Check(responses ? doc.RootElement.GetProperty("reasoning").GetProperty("effort").GetString() == "high"
+                : doc.RootElement.GetProperty("thinking").GetProperty("type").GetString() == "enabled", "combat thinking must be enabled: " + scene);
+            return responses ? JsonResponse(new { output_text = "{\"actionId\":\"map:1\",\"reason\":\"ready\"}" }) : Chat("{\"actionId\":\"map:1\",\"reason\":\"ready\"}");
+        }));
+        using var client = new ProviderClient(http);
+        var frame = Frame() with { Scene = scene, IsCombatDecision = true };
+        await client.DecideAsync(config, frame, CancellationToken.None);
+        Check(config.ThinkingEnabled == false, "noncombat configuration retained");
+    }
+});
 await Test("chat JSON mode may be disabled explicitly", async () =>
 {
     var config = Config(); config.UseJsonMode = false;

@@ -44,7 +44,8 @@ public sealed class ProviderClient : IDisposable
         var scopeNode = JsonSerializer.SerializeToNode(frame.FullState ?? frame.State);
         var game = scopeNode?["game"] ?? scopeNode;
         string scope = (game?["runKey"]?.ToString() ?? "unscoped") + ":" + (game?["CurrentActIndex"]?.ToString() ?? game?["currentActIndex"]?.ToString() ?? "0");
-        var identity = new AgentSession.SessionIdentity(endpoint.ToString(), config.Model, config.Strategy, config.ApiMode, config.ThinkingEnabled, config.ApiKey, scope, config.Temperature, config.UseJsonMode);
+        bool? effectiveThinking = frame.IsCombatDecision ? true : config.ThinkingEnabled;
+        var identity = new AgentSession.SessionIdentity(endpoint.ToString(), config.Model, config.Strategy, config.ApiMode, effectiveThinking, config.ApiKey, scope, config.Temperature, config.UseJsonMode);
         var proposal = session.Prepare(identity, responses, openAiServer, stableInput, fullStableInput, volatileInput, fullVolatileInput,
             config.SessionMaxTurns, config.SessionMaxInputBytes, config.SessionMaxHistoryRatio, config.PersistentSession);
         Dictionary<string, object?> body = responses
@@ -59,7 +60,7 @@ public sealed class ProviderClient : IDisposable
         if (config.Temperature is double temperature) body["temperature"] = temperature;
         if (!responses && config.UseJsonMode) body["response_format"] = new { type = "json_object" };
         // Optional provider extension. Null preserves every provider's ordinary defaults.
-        if (config.ThinkingEnabled is bool thinking)
+        if (effectiveThinking is bool thinking)
         {
             if (responses) body["reasoning"] = new { effort = thinking ? "high" : "none" };
             else body["thinking"] = new { type = thinking ? "enabled" : "disabled" };
