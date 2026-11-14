@@ -29,7 +29,5 @@ internal static class SolverMemoryPolicy
     internal static int WorkerLimit(SolverMemorySample sample, int requested)
         => sample.Valid ? (int)Math.Clamp(Headroom(sample) / (384 * MiB), 1, Math.Max(1, requested))
             : requested;
-    internal static bool Critical(SolverMemorySample sample)
-        => sample.Valid && (sample.AvailablePhysical < Math.Max(512 * MiB, sample.TotalPhysical / 40)
-            || sample.AvailableCommit < 768 * MiB);
 }
+

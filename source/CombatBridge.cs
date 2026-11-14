@@ -92,12 +92,6 @@ public sealed class CombatBridge
         }
 
         SolverPresentation.Activate(_controller!);
-        if (SolverMemoryGuard.Poll())
-        {
-            Status = "内存保护已暂停求解；释放系统内存后按 F9 继续";
-            _engagedThisCombat = true;
-            return false;
-        }
 
         bool active = ReadBoolean("FullAutoEnabled");
         if (active)
@@ -212,3 +206,4 @@ public sealed class CombatBridge
         SolverProgressCapture.Reset();
     }
 }
+

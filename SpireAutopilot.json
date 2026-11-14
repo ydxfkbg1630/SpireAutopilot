@@ -3,7 +3,7 @@
   "name": "尖塔全程领航",
   "author": "ydxfkbg1630",
   "description": "使用 OpenAI 兼容模型决策地图、事件、奖励、商店和休息处，结合 CombatSolver 自动战斗。F8 打开控制面板，F9 启停。",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": true,
@@ -15,3 +15,4 @@
     }
   ]
 }
+

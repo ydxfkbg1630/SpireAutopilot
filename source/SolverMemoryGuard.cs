@@ -6,23 +6,17 @@ using MegaCrit.Sts2.Core.Nodes;
 
 namespace SpireAutopilot;
 
-/// <summary>Uses the solver's drained reclamation boundaries and native stop API.</summary>
+/// <summary>Uses the solver's drained reclamation boundaries and adaptive worker admission.</summary>
 internal static class SolverMemoryGuard
 {
     private const BindingFlags Static = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
     private static readonly object SampleLock = new();
     private static SolverMemorySample sample;
     private static long nextSample;
-    private static Func<bool>? searching;
-    private static Action<NGame>? stop;
-    private static bool stopIssued;
 
     internal static void Install(Harmony patcher, Assembly solver)
     {
         Type gc = solver.GetType("CombatSolver.SearchGcPolicy", true)!;
-        Type controller = solver.GetType("CombatSolver.SolverController", true)!;
-        searching = controller.GetProperty("IsSearching", Static)!.GetMethod!.CreateDelegate<Func<bool>>();
-        stop = controller.GetMethod("StopSearchByUser", Static)!.CreateDelegate<Action<NGame>>();
         patcher.Patch(gc.GetMethod("ResolveSystemMemoryLimit", Static)!,
             postfix: new HarmonyMethod(typeof(SolverMemoryGuard), nameof(SystemLimitPostfix)));
         // A bounded ordinary-GC epoch preserves native parallel drain/reclaim handling.
@@ -45,23 +39,6 @@ internal static class SolverMemoryGuard
 
     internal static int EffectiveWorkerLimit(int requested)
         => SolverPresentation.Active ? SolverMemoryPolicy.WorkerLimit(Capture(), requested) : requested;
-
-    /// <summary>Call on the main thread; only native search stop touches Godot.</summary>
-    internal static bool Poll()
-    {
-        if (!SolverPresentation.Active || searching?.Invoke() != true)
-        {
-            stopIssued = false;
-            return false;
-        }
-        if (stopIssued) return true;
-        SolverMemorySample current = Capture();
-        if (!SolverMemoryPolicy.Critical(current) || NGame.Instance is not { } host) return false;
-        stopIssued = true;
-        stop!(host);
-        GD.Print($"[SpireAutopilot] SOLVER_MEMORY_STOP physical_available_mib={current.AvailablePhysical / SolverMemoryPolicy.MiB} commit_available_mib={current.AvailableCommit / SolverMemoryPolicy.MiB} native_stop=true");
-        return true;
-    }
 
     private static SolverMemorySample Capture()
     {
@@ -92,3 +69,4 @@ internal static class SolverMemoryGuard
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
 }
+
