@@ -22,6 +22,9 @@ public sealed class AutopilotConfig
     public int RequestTimeoutSeconds { get; set; } = 45;
     public double DecisionDelaySeconds { get; set; } = 1;
     public bool AutoCombat { get; set; } = true;
+    public string CombatMode { get; set; } = "Solver";
+    public bool ReflectAfterCombat { get; set; } = true;
+    public bool UseBattleExperience { get; set; } = true;
     public int SolverWorkerLimit { get; set; }
     public bool SolverMaxSpeed { get; set; } = true;
     public bool BroadcastMode { get; set; } = true;
@@ -109,4 +112,3 @@ internal static class WindowsSecret
         }
     }
 }
-

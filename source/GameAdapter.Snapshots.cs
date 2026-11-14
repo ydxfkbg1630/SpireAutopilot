@@ -86,6 +86,9 @@ public sealed partial class GameAdapter
     private static object SnapshotPlayer(Player player) => new
     {
         character = SnapshotModel(player.Character), hp = player.Creature.CurrentHp, maxHp = player.Creature.MaxHp, player.Gold,
+        block = player.Creature.Block, powers = player.Creature.Powers.Select(SnapshotModel).ToArray(),
+        energy = player.PlayerCombatState?.Energy, stars = player.PlayerCombatState?.Stars,
+        turn = player.PlayerCombatState?.TurnNumber, phase = player.PlayerCombatState?.Phase.ToString(),
         deck = player.Deck.Cards.Select(SnapshotCard).ToArray(), relics = player.Relics.Select(SnapshotModel).ToArray(),
         potions = player.PotionSlots.Select(SnapshotModel).ToArray(), player.MaxPotionCount, player.MaxEnergy
     };
@@ -99,7 +102,8 @@ public sealed partial class GameAdapter
         return new
         {
             type = model.GetType().Name, id = Text(Member(model, "Id")), name = ModelTitle(model),
-            description = model is RelicModel relic ? relic.HoverTip.Description : model is PotionModel potion ? potion.HoverTip.Description : Text(Member(model, "DynamicDescription") ?? Member(model, "Description")), rarity = Text(Member(model, "Rarity")),
+            description = model is RelicModel relic ? relic.HoverTip.Description : model is PotionModel potion ? potion.HoverTip.Description
+                : model is PowerModel power ? power.GetDumbHoverTip().Description : Text(Member(model, "DynamicDescription") ?? Member(model, "Description")), rarity = Text(Member(model, "Rarity")),
             amount = Member(model, "Amount")?.ToString(), counter = Member(model, "DisplayAmount")?.ToString(),
             // Dynamic amounts support relic counters and mod model data without serializing native object graphs.
             dynamicVars = SnapshotDynamicVars(Member(model, "DynamicVars"))
@@ -136,6 +140,7 @@ public sealed partial class GameAdapter
             type = card.Type.ToString(), rarity = card.Rarity.ToString(), card.IsUpgraded,
             upgradeLevel = card.CurrentUpgradeLevel, cost = card.EnergyCost.GetResolved(), costsX = card.EnergyCost.CostsX,
             keywords = Items(Member(card, "Keywords")).Select(Text).ToArray(), dynamicVars = SnapshotDynamicVars(card.DynamicVars),
+            relatedEffects = Items(Member(card, "HoverTips")).Select(t => new { name = Text(Member(t, "Title")), description = Text(Member(t, "Description")) }).ToArray(),
             enchantment = SnapshotSimpleModel(Member(card, "Enchantment")), affliction = SnapshotSimpleModel(Member(card, "Affliction"))
         };
     }
@@ -157,4 +162,8 @@ public sealed partial class GameAdapter
         name = Text(Member(v, "Name")), value = Text(Member(v, "BaseValue")), current = Text(Member(v, "Value")),
         upgraded = Text(Member(v, "UpgradeValue"))
     }).ToArray();
+
+    private static object[] SnapshotActMap(MegaCrit.Sts2.Core.Runs.IRunState run)
+        => run.Map.GetAllMapPoints().Concat(new[] { run.Map.StartingMapPoint, run.Map.BossMapPoint, run.Map.SecondBossMapPoint }
+            .OfType<MapPoint>()).Distinct().OrderBy(p => p.coord.row).ThenBy(p => p.coord.col).Select(MapInfo).ToArray();
 }

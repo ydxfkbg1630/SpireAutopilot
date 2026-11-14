@@ -53,4 +53,3 @@ internal static class CompatibilityProbe
         finally { SolverPresentation.WorkerLimit = previousLimit; }
     }
 }
-

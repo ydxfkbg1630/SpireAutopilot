@@ -18,5 +18,8 @@
   "AllowNativeUiFallback": true,
   "ThinkingEnabled": false,
   "UseJsonMode": true,
-  "ApiKeyProtected": ""
+  "ApiKeyProtected": "",
+  "CombatMode": "Solver",
+  "ReflectAfterCombat": true,
+  "UseBattleExperience": true
 }

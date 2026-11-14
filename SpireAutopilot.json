@@ -2,8 +2,8 @@
   "id": "SpireAutopilot",
   "name": "尖塔全程领航",
   "author": "ydxfkbg1630",
-  "description": "使用 OpenAI 兼容模型决策地图、事件、奖励、商店和休息处，结合 CombatSolver 自动战斗。F8 打开控制面板，F9 启停。",
-  "version": "0.4.5",
+  "description": "使用 OpenAI 兼容模型规划地图、事件、奖励与商店，战斗可选 CombatSolver 或模型出牌，支持战后经验与完整求解器参数设置。F8 设置，F9 启停，F10 直播窗。",
+  "version": "0.4.6",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": true,
@@ -15,7 +15,3 @@
     }
   ]
 }
-
-
-
-

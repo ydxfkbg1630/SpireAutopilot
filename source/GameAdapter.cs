@@ -40,6 +40,19 @@ public sealed partial class GameAdapter
     public bool InCombat => CombatManager.Instance.IsInProgress;
     public bool RunActive => RunManager.Instance.IsInProgress;
     public bool RunFinished => RunManager.Instance.IsGameOver || RunManager.Instance.HasRunEnded;
+    public string? RunIdentity => RunManager.Instance.DebugOnlyGetState() is { } run
+        ? run.Rng.StringSeed + ":" + run.Players.FirstOrDefault()?.Character.Id + ":" + run.AscensionLevel : null;
+    public object? CaptureRunObservation()
+    {
+        var run = RunManager.Instance.DebugOnlyGetState();
+        var player = run == null ? null : LocalContext.GetMe(run);
+        return run == null || player == null ? null : new
+        {
+            runKey = RunIdentity, run.CurrentActIndex, run.ActFloor, run.TotalFloor,
+            player = SnapshotPlayer(player), currentMapPoint = run.CurrentMapCoord is { } point ? new { row = point.row, column = point.col } : null,
+            room = run.CurrentRoom?.GetType().Name
+        };
+    }
 
     public bool TryHandleTutorial()
     {
@@ -163,6 +176,7 @@ public sealed partial class GameAdapter
             currentMapPoint = run.CurrentMapCoord is { } coordinate ? new { row = coordinate.row, column = coordinate.col } : null,
             sceneType, sceneInstance = scene.GetInstanceId(), run.CurrentActIndex, run.ActFloor,
             run.TotalFloor, run.AscensionLevel, room = run.CurrentRoom?.GetType().Name,
+            actMap = SnapshotActMap(run),
             player = SnapshotPlayer(player), context = extra,
             // Visible controls include enabled/selection state, but exclude position, animation, frame clock and VFX.
             controls = Walk(scene).Where(n => n is NClickableControl || n is NCardHolder).Where(LiveVisible)

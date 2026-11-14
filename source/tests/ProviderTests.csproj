@@ -13,4 +13,3 @@
     <Compile Include="../DecisionContracts.cs" Link="DecisionContracts.cs" />
   <Compile Include="../AgentSession.cs" /></ItemGroup>
 </Project>
-

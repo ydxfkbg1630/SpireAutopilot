@@ -36,5 +36,27 @@ Test("card dictionary deduplicates and preserves native semantics", () => { var 
 Test("volatile token and history stay outside stable context and map only stable", () => { var f = Frame(); var p = new RoutePlanner(); p.Observe(f, "safe"); var context = new DecisionContext(); var a = context.Prepare(f, p, new[] { "history-one" }); var b = context.Prepare(f with { Token = "token-two" }, p, new[] { "history-two" }); var stable = JsonSerializer.Serialize(a.StableContext); Check(stable == JsonSerializer.Serialize(b.StableContext), "stable prefix identical"); Check(!stable.Contains("token-one") && !stable.Contains("history-one"), "volatile excluded"); var state = JsonSerializer.SerializeToNode(a.State)!; Check(state["game"]!["context"]!["map"] == null && JsonSerializer.SerializeToNode(a.StableContext)!["actMap"] is JsonArray, "map moved once"); });
 Test("new run resets append-only card dictionary", () => { var context = new DecisionContext(); var p = new RoutePlanner(); var a = Frame(); p.Observe(a, "safe"); context.Prepare(a, p, Array.Empty<string>()); var b = Frame(run: "new-run"); var state = (JsonObject)b.State; state["player"]!["deck"] = new JsonArray(Card("CARD.DEFEND")); p.Observe(b, "safe"); var next = context.Prepare(b, p, Array.Empty<string>()); var dictionary = JsonSerializer.SerializeToNode(next.StableContext)!["cardDictionary"]!.AsArray(); Check(dictionary.Count == 1 && dictionary[0]!["definition"]!["id"]!.ToString() == "CARD.DEFEND", "run dictionary reset"); });
 
+Test("combat and card-choice context retain effects, piles, position and lessons", () =>
+{
+    var raw = Frame() with { Scene = "Combat" };
+    var state = (JsonObject)raw.State;
+    var map = state["context"]!["map"]!.DeepClone();
+    state["actMap"] = map;
+    state["player"]!["relics"] = new JsonArray(new JsonObject { ["id"] = "RELIC.TEST", ["description"] = "Gain 1 strength each turn", ["counter"] = 2 });
+    state["observation"] = new JsonObject { ["hand"] = new JsonArray(Card()), ["drawPile"] = new JsonObject { ["orderKnown"] = false, ["cards"] = new JsonArray(Card("CARD.DEFEND")) }, ["discardPile"] = new JsonArray(Card("CARD.BASH")), ["exhaustPile"] = new JsonArray(Card("CARD.EXHAUST")), ["enemies"] = new JsonArray(new JsonObject { ["hp"] = 20, ["intents"] = new JsonArray(new JsonObject { ["totalDamage"] = 12, ["repeats"] = 2 }) }) };
+    var context = new DecisionContext { BattleLessons = "Observed: block mitigated a two-hit attack." };
+    var route = new RoutePlanner(); route.Observe(raw, "safe");
+    var prepared = context.Prepare(raw, route, Array.Empty<string>());
+    var stable = JsonSerializer.SerializeToNode(prepared.FullStableContext)!;
+    var game = JsonSerializer.SerializeToNode(prepared.FullState)!["game"]!;
+    Check(JsonNode.DeepEquals(stable["actMap"], map), "actual complete map retained");
+    Check(stable["battleExperience"]!.ToString().Contains("two-hit"), "lessons survive new-run context reset");
+    Check(stable["cardDictionary"]!.AsArray().Count == 4, "all four card-pile definitions preserved");
+    Check(game["observation"]!["drawPile"]!["orderKnown"]!.GetValue<bool>() == false && game["currentMapPoint"]!["row"]!.GetValue<int>() == 0, "hidden order and position preserved");
+    Check(game["player"]!["relics"]![0]!["description"]!.ToString().Contains("strength") && game["observation"]!["enemies"]![0]!["intents"]![0]!["totalDamage"]!.GetValue<int>() == 12, "effects and actual damage retained");
+    context.Commit(prepared);
+    var choice = context.Prepare(raw with { Scene = "NSimpleCardSelectScreen" }, route, Array.Empty<string>());
+    Check(JsonNode.DeepEquals(JsonSerializer.SerializeToNode(choice.FullState)!["game"], game), "card selection retains complete same battle context");
+});
 Console.WriteLine($"RESULT passed={passed} failed={failures.Count}");
 return failures.Count == 0 ? 0 : 1;

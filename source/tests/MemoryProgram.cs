@@ -25,6 +25,3 @@ for (int availableCommit = 0; availableCommit <= 40; availableCommit++)
     Check(EpochBudget(value, 16 * GiB) == 4 * GiB, "Epoch bounds over pressure grid");
 }
 Console.WriteLine($"Memory policy checks passed: {checks}");
-
-
-

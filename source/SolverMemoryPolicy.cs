@@ -26,6 +26,3 @@ internal static class SolverMemoryPolicy
     internal static long EpochBudget(SolverMemorySample sample, long requested)
         => Math.Min(requested, 4 * GiB);
 }
-
-
-

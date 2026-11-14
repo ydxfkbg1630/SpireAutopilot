@@ -54,4 +54,3 @@ internal static class SolverThroughput
 
     private sealed class Counter { public int Checks; }
 }
-

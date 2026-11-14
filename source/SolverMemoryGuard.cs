@@ -66,6 +66,3 @@ internal static class SolverMemoryGuard
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
 }
-
-
-

@@ -277,4 +277,3 @@ public static class SolverPresentation
         }
     }
 }
-
