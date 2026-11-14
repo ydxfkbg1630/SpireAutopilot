@@ -136,6 +136,10 @@ public static class NativeProbe
                     {
                         Write("compatibility.json", CompatibilityProbe.Verify());
                         compatibilityChecked = true;
+                        if (System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_PROBE_PROFILE_ONLY") == "1")
+                        {
+                            success = true; outcome = "quality_snapshot_preserved"; stage = "completed_profile_checks"; break;
+                        }
                     }
                     var currentCombat = CombatManager.Instance.DebugOnlyGetState();
                     if (!ReferenceEquals(lastRecordedCombat, currentCombat))

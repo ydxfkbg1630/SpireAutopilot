@@ -24,7 +24,6 @@ public sealed class AutopilotConfig
     public bool AutoCombat { get; set; } = true;
     public int SolverWorkerLimit { get; set; }
     public bool SolverMaxSpeed { get; set; } = true;
-    public bool SolverLiveMode { get; set; } = true;
     public bool BroadcastMode { get; set; } = true;
     public bool LightweightSolverDiagnostics { get; set; } = true;
     public bool AllowNativeUiFallback { get; set; } = true;
@@ -110,3 +109,4 @@ internal static class WindowsSecret
         }
     }
 }
+

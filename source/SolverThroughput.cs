@@ -42,7 +42,7 @@ internal static class SolverThroughput
     private static void ExecutorPostfix(int __1)
     {
         if (SolverPresentation.Active)
-            GD.Print($"[SpireAutopilot] SEARCH_EXECUTOR workers={__1} live_mode={SolverLiveSearch.Enabled}");
+            GD.Print($"[SpireAutopilot] SEARCH_EXECUTOR workers={__1}");
     }
 
     internal static void AnnounceOnce()
@@ -54,3 +54,4 @@ internal static class SolverThroughput
 
     private sealed class Counter { public int Checks; }
 }
+

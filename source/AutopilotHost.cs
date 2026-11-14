@@ -88,7 +88,6 @@ public partial class AutopilotHost : Node
         SolverPresentation.WorkerLimit = config.SolverWorkerLimit;
         SolverPresentation.MaxSpeed = config.SolverMaxSpeed;
         SolverPresentation.LightweightDiagnostics = config.LightweightSolverDiagnostics;
-        SolverLiveSearch.Enabled = config.SolverLiveMode;
         if (config.AutoCombat) combat.PrepareOwnership();
         panel.ShowMonitor();
         generation++;
@@ -203,7 +202,6 @@ public partial class AutopilotHost : Node
             if (game.InCombat)
             {
                 SolverPresentation.WorkerLimit = config.SolverWorkerLimit;
-                SolverLiveSearch.Enabled = config.SolverLiveMode;
                 SolverPresentation.MaxSpeed = config.SolverMaxSpeed;
                 SolverPresentation.LightweightDiagnostics = config.LightweightSolverDiagnostics;
                 if (config.AutoCombat)
@@ -364,3 +362,4 @@ public partial class AutopilotHost : Node
         provider.Dispose();
     }
 }
+

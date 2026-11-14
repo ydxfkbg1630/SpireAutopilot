@@ -12,16 +12,6 @@ internal static class CompatibilityProbe
         Type controller = solver.GetType("CombatSolver.SolverController")!;
         var capture = solver.GetType("CombatSolver.SolverSettings")!.GetMethod("Capture", flags)!;
         var native = capture.Invoke(null, null)!;
-        if (SolverLiveSearch.Enabled)
-        {
-            var liveType = native.GetType();
-            foreach (var name in new[] { "UseBeamWidthPortfolio", "UseNoveltyPortfolio", "UseEarlyTurnExploration" })
-                if ((bool)liveType.GetProperty(name)!.GetValue(native)!) throw new InvalidOperationException("Live portfolio limit: " + name);
-            var liveProfile = liveType.GetProperty("Profile")!.GetValue(native)!;
-            foreach (var limit in new[] { ("BeamWidth", 64), ("MaxExpandedNodes", 50000), ("SoftTimeBudgetMilliseconds", 20000) })
-                if (Convert.ToInt64(liveProfile.GetType().GetProperty(limit.Item1)!.GetValue(liveProfile)) > limit.Item2)
-                    throw new InvalidOperationException("Live profile limit: " + limit.Item1);
-        }
         Type snapshot = native.GetType();
         var clone = snapshot.GetMethod("<Clone>$")!;
         var workers = snapshot.GetProperty("SearchMaxDegreeOfParallelism")!;
@@ -36,6 +26,12 @@ internal static class CompatibilityProbe
             hook.Invoke(null, args);
             int effective = (int)workers.GetValue(args[0])!;
             int untouched = (int)workers.GetValue(input)!;
+            foreach (string name in new[] { "Profile", "UseBeamWidthPortfolio", "UseNoveltyPortfolio", "UseEarlyTurnExploration" })
+            {
+                var property = snapshot.GetProperty(name)!;
+                if (!Equals(property.GetValue(input), property.GetValue(args[0])))
+                    throw new InvalidOperationException("Search quality setting changed: " + name);
+            }
             if (effective != 8 || untouched != 16 || ReferenceEquals(input, args[0])) throw new InvalidOperationException("Runtime worker snapshot ceiling assertion failed.");
             SolverPresentation.WorkerLimit = 0;
             object?[] follow = { input };
@@ -52,8 +48,9 @@ internal static class CompatibilityProbe
             SolverPresentation.Activate(controller);
             return new { success=true, nativeSnapshotWorkers=workers.GetValue(native), syntheticOriginal=untouched, cappedWorkers=effective,
                 followUserWorkers=workers.GetValue(follow[0]), pausedWorkers=workers.GetValue(restored[0]), solverOverlayHidden=hidden,
-                actualSearchWorkersAltered=false, persistedSettingsAltered=false };
+                actualSearchWorkersAltered=false, persistedSettingsAltered=false, searchProfilePreserved=true };
         }
         finally { SolverPresentation.WorkerLimit = previousLimit; }
     }
 }
+
