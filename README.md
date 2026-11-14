@@ -9,7 +9,7 @@
 目标版本：游戏 v0.113.0、Godot 4.5.1、.NET 9；CombatSolver 0.51.5。
 
 1. 通过 Steam 创意工坊安装并启用 **CombatSolver** 及其 **RitsuLib** 依赖。
-2. 从本项目 GitHub Releases 下载模组安装包，解压至游戏的 `mods/SpireAutopilot/`。该目录应包含 `SpireAutopilot.dll` 和 `SpireAutopilot.json`。
+2. 从本项目 GitHub Releases 下载模组安装包，将包内 `SpireAutopilot` 文件夹放入游戏的 `mods/` 目录。最终 `mods/SpireAutopilot/` 应包含 `SpireAutopilot.dll` 和 `SpireAutopilot.json`。
 3. 启动游戏并启用「尖塔全程领航」，进入或继续一局单人游戏。
 4. 按 **F8** 填写模型 Base URL、模型 ID 和 API Key，测试连接。
 5. 按 **F9** 开始或暂停；按 **F10** 显示或隐藏直播小窗。
