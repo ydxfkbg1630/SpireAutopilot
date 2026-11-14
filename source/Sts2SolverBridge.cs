@@ -66,6 +66,12 @@ internal sealed class Sts2SolverBridge
         setAuto!.Invoke(null, new object[] { true, false });
     }
 
+    internal void HideOverlayOnly()
+    {
+        if (!EnsureInstalled()) return;
+        hideOverlay = true;
+    }
+
     internal bool EnsureAutomaticCombat()
     {
         if (!EnsureInstalled()) { Status = "请启用 STS2 Solver"; return false; }
@@ -74,6 +80,9 @@ internal sealed class Sts2SolverBridge
         if (!ReferenceEquals(combatIdentity, battle)) { combatIdentity = battle; engaged = false; }
         if (!owned) PrepareOwnership();
         var snapshot = Snapshot();
+        if (Read(snapshot, "ErrorCode") is { } importError && importError.ToString() is { Length: > 0 } errorText
+            && !string.Equals(errorText, "-", StringComparison.Ordinal))
+        { Status = "STS2 Solver：" + errorText + "；" + Read(snapshot, "ErrorDetail"); return false; }
         if (ReadBool(snapshot, "CombatRunActive") || ReadBool(snapshot, "IsDeploying")) { engaged = true; Status = "STS2 Solver 自动执行"; return true; }
         if (engaged && ReadBool(snapshot, "CombatRunPaused")) { Status = "STS2 Solver 已按原生条件暂停"; return false; }
         if (ReadBool(snapshot, "CurrentTurnRouteReady") && !ReadBool(snapshot, "IsSearching"))
@@ -97,10 +106,13 @@ internal sealed class Sts2SolverBridge
     {
         _ = CancelAndDisableAutomation("pilot_pause");
         owned = false; engaged = false;
+        hideOverlay = false;
+        if (GodotObject.IsInstanceValid(ownedOverlay)) ownedOverlay!.Visible = overlayWasVisible;
+        ownedOverlay = null;
     }
     internal void Release()
     {
-        if (cancellation is { IsCompleted: false }) return;
+        if (cancellation != null && (!cancellation.IsCompletedSuccessfully || !cancellation.Result || !Capture().IsQuiescent)) return;
         if (patched && originalAuto is bool value) setAuto!.Invoke(null, new object[] { value, false });
         originalAuto = null; owned = false; engaged = false; blocked = false;
         hideOverlay = false;
@@ -111,19 +123,24 @@ internal sealed class Sts2SolverBridge
     {
         if (!EnsureInstalled()) return new(false, false, false, false, 0, true, false, new("waiting", "等待 STS2 Solver"), Status);
         object snapshot = Snapshot();
+        var searchRequest = controller!.GetField("_search", Static)?.GetValue(null);
         var worker = session!.GetField("_worker", Static)?.GetValue(null) as Task;
-        if (!ReferenceEquals(worker, timedWorker)) { timedWorker = worker; workerStarted = worker == null ? 0 : Stopwatch.GetTimestamp(); }
-        bool searching = worker is { IsCompleted: false };
+        var requestIdentity = searchRequest ?? (ReadBool(snapshot, "IsSearching") ? worker : null);
+        if (!ReferenceEquals(requestIdentity, timedWorker)) { timedWorker = requestIdentity; workerStarted = requestIdentity == null ? 0 : Stopwatch.GetTimestamp(); }
+        bool searching = ReadBool(snapshot, "IsSearching") || searchRequest != null;
         bool deploying = ReadBool(snapshot, "IsDeploying") || ReadBool(snapshot, "TurnSetupDriving");
         bool running = (bool)session.GetProperty("IsRunning", Static)!.GetValue(null)!;
         bool busy = (bool)controller!.GetProperty("IsBusy", Static)!.GetValue(null)!;
-        double elapsed = searching ? Stopwatch.GetElapsedTime(workerStarted).TotalSeconds : 0;
-        bool complete = ReadBool(snapshot, "CurrentTurnRouteReady") || worker?.IsCompleted == true;
+        double elapsed = searching && workerStarted != 0 ? Stopwatch.GetElapsedTime(workerStarted).TotalSeconds : 0;
+        bool complete = searchRequest == null && !ReadBool(snapshot, "IsSearching") && ReadBool(snapshot, "CurrentTurnRouteReady");
         var search = Read(snapshot, "Search");
+        string snapshotError = Read(snapshot, "ErrorCode")?.ToString() ?? "";
+        string finalStatus = snapshotError.Length > 0 && snapshotError != "-" ? "STS2 Solver：" + snapshotError + "；" + Read(snapshot, "ErrorDetail") : Status;
         var progress = new SolverProgressView(searching ? "search" : deploying ? "deployment" : "waiting",
             searching ? "STS2 Solver 搜索路线" : deploying ? "STS2 Solver 自动出牌" : "等待主求解器",
-            searching ? elapsed : null, ReadLong(search, "ExpandedNodes"), CurrentAction: Read(snapshot, "CurrentAction")?.ToString());
-        return new(true, searching, deploying, complete, elapsed, !busy && !running && !deploying && (cancellation?.IsCompleted ?? true), ReadBool(snapshot, "CombatRunActive"), progress, Status);
+            searching ? elapsed : null, ReadLong(search, "ExpandedNodes"), CurrentAction: Read(snapshot, "CurrentAction")?.ToString(),
+            Detail: snapshotError.Length > 0 ? finalStatus : null);
+        return new(true, searching, deploying, complete, elapsed, !busy && !running && !deploying && (cancellation?.IsCompleted ?? true), ReadBool(snapshot, "CombatRunActive"), progress, finalStatus);
     }
     private static object Snapshot() => store!.GetProperty("Snapshot", Static)!.GetValue(null)!;
     private static object? Read(object? value, string name) => value?.GetType().GetProperty(name, Instance)?.GetValue(value);

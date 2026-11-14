@@ -57,6 +57,13 @@ public static class SolverPresentation
     public static bool LightweightDiagnostics { get; set; } = true;
     public static bool MaxSpeed { get => maxSpeed; set => maxSpeed = value; }
 
+    public static void ActivateForExternalSolver()
+    {
+        var controller = AppDomain.CurrentDomain.GetAssemblies()
+            .Select(a => a.GetType("CombatSolver.SolverController", false)).FirstOrDefault(t => t != null);
+        if (controller != null) Activate(controller);
+    }
+
     public static void Activate(Type controller)
     {
         if (!bound) Bind(controller);
@@ -186,21 +193,21 @@ public static class SolverPresentation
 
     private static bool ShowLayerPrefix()
     {
-        if (!SuppressPresentation || !IsOwnedCombat()) return true;
+        if (!SuppressPresentation || !active) return true;
         HideOwnedLayer();
         return false;
     }
 
     private static bool RenderPrefix()
     {
-        if (!SuppressPresentation || !IsOwnedCombat()) return true;
+        if (!SuppressPresentation || !active) return true;
         suppressedUpdates++;
         return false;
     }
 
     private static bool PopulateRoutePrefix()
     {
-        if (!SuppressPresentation || !IsOwnedCombat()) return true;
+        if (!SuppressPresentation || !active) return true;
         routePresentationDeferred = true;
         deferredRouteUpdates++;
         return false;

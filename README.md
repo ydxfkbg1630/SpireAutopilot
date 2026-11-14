@@ -83,3 +83,7 @@ dotnet run --project source/tests/MemoryTests.csproj
 请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [SECURITY.md](SECURITY.md)。SpireAutopilot 的原创代码按 **Apache License 2.0** 发布，详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
 
 STS2 Solver、CombatSolver、RitsuLib、FoolSolverCompat、Godot、Harmony 以及游戏本体分别遵循各自的许可证或使用条款。本项目引用游戏的本地程序集，并通过运行时反射衔接两套求解器。游戏资源与这些第三方依赖由各自官方渠道提供。
+
+### 说书人兼容补丁
+
+STS2 Solver 0.2.3 对原生遗物说书人的注册缺口会导致 unsupported-relic STORYTELLER。Release 附带 Sts2Solver-Storyteller-fix.zip，包含本地兼容 DLL、许可证、原作者说明及源码差异。它补齐真实遗物语义并保留原有内容校验。安装到 mods/Sts2Solver，或待原作者版本包含该修复后使用原版。
