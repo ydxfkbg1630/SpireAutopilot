@@ -19,8 +19,7 @@
   "ThinkingEnabled": false,
   "UseJsonMode": true,
   "ApiKeyProtected": "",
-  "CombatMode": "Hybrid",
-  "ReflectAfterCombat": true,
-  "UseBattleExperience": true,
-  "HybridSolverTimeoutSeconds": 30
+  "PrimarySolverTimeoutSeconds": 120,
+  "ReflectAfterRun": true,
+  "UseRunExperience": true
 }

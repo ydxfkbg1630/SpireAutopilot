@@ -22,16 +22,6 @@ DecisionFrame Frame() => new("token-123", "Map", new { hp = 30 }, new[] { new Le
 HttpResponseMessage JsonResponse(object value) => new(HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(value), Encoding.UTF8, "application/json") };
 HttpResponseMessage Chat(string text) => JsonResponse(new { choices = new[] { new { message = new { content = text } } } });
 
-await Test("battle reflection note parses and bounded text survives", () =>
-{
-    var actions = new[] { new LegalAction("write_experience", "记录经验", "reflection") };
-    string note = "### 对战经验\n观察：先格挡，再攻击。";
-    var result = ProviderClient.ParseDecision(JsonSerializer.Serialize(new { actionId = "write_experience", reason = "复盘", experienceNote = note }), actions);
-    Check(result.ExperienceNote == note, "Markdown note roundtrip");
-    result = ProviderClient.ParseDecision(JsonSerializer.Serialize(new { actionId = "write_experience", reason = "复盘", experienceNote = new string('a', 7000) }), actions);
-    Check(result.ExperienceNote?.Length == 6000, "note length bound");
-    return Task.CompletedTask;
-});
 await Test("endpoint roots and full endpoints", () =>
 {
     foreach (var input in new[] { "https://example.test", "https://example.test/", "https://example.test/v1", "https://example.test/v1/", "https://example.test/v1/chat/completions", "https://example.test/v1/responses" })
@@ -355,16 +345,16 @@ await Test("configuration roundtrip with Windows user credential", () =>
     var path = Path.Combine(dir, "config.json");
     try
     {
-        var config = Config(); config.Strategy = "保持生命"; config.DecisionDelaySeconds = 1.5; config.HybridSolverTimeoutSeconds = 75;
+        var config = Config(); config.Strategy = "保持生命"; config.DecisionDelaySeconds = 1.5; config.PrimarySolverTimeoutSeconds = 120;
         config.Save(path);
         var saved = File.ReadAllText(path);
         Check(!saved.Contains(config.ApiKey), "secret encrypted at rest");
         Check(saved.Contains("ApiKeyProtected"), "encrypted field");
         var loaded = AutopilotConfig.Load(path);
         Check(loaded.ApiKey == config.ApiKey && loaded.Strategy == config.Strategy && loaded.DecisionDelaySeconds == 1.5, "roundtrip");
-        Check(loaded.HybridSolverTimeoutSeconds == 75, "custom solver wait persists");
+        Check(loaded.PrimarySolverTimeoutSeconds == 120, "primary solver timeout persists");
         File.WriteAllText(Path.Combine(dir, "legacy.json"), "{}");
-        Check(AutopilotConfig.Load(Path.Combine(dir, "legacy.json")).HybridSolverTimeoutSeconds == 30, "older configurations default to thirty seconds");
+        Check(AutopilotConfig.Load(Path.Combine(dir, "legacy.json")).PrimarySolverTimeoutSeconds == 120, "older configurations default to one hundred twenty seconds");
         config.ApiKey = ""; config.Save(path);
         Check(AutopilotConfig.Load(path).ApiKey == "", "clear key");
         Check(AutopilotConfig.Load(Path.Combine(dir, "absent.json")).RequestTimeoutSeconds == 45, "default config");

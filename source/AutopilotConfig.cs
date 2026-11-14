@@ -22,10 +22,9 @@ public sealed class AutopilotConfig
     public int RequestTimeoutSeconds { get; set; } = 45;
     public double DecisionDelaySeconds { get; set; } = 1;
     public bool AutoCombat { get; set; } = true;
-    public string CombatMode { get; set; } = "Hybrid";
-    public int HybridSolverTimeoutSeconds { get; set; } = 30;
-    public bool ReflectAfterCombat { get; set; } = true;
-    public bool UseBattleExperience { get; set; } = true;
+    public int PrimarySolverTimeoutSeconds { get; set; } = 120;
+    public bool ReflectAfterRun { get; set; } = true;
+    public bool UseRunExperience { get; set; } = true;
     public int SolverWorkerLimit { get; set; }
     public bool SolverMaxSpeed { get; set; } = true;
     public bool BroadcastMode { get; set; } = true;
