@@ -18,5 +18,6 @@
   "AllowNativeUiFallback": true,
   "ThinkingEnabled": false,
   "UseJsonMode": true,
-  "ApiKeyProtected": ""
+  "ApiKeyProtected": "",
+  "SolverLiveMode": true
 }

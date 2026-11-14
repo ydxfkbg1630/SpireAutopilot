@@ -16,6 +16,10 @@ internal static class SolverThroughput
     internal static void Install(Harmony patcher, Assembly solver)
     {
         SolverMemoryGuard.Install(patcher, solver);
+        var executor = solver.GetType("CombatSolver.CombatBeamSolver+ParallelExpansionExecutor", true)!;
+        var constructor = executor.GetConstructors(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+            .Single(c => c.GetParameters().Length == 2 && c.GetParameters()[1].ParameterType == typeof(int));
+        patcher.Patch(constructor, postfix: new HarmonyMethod(typeof(SolverThroughput), nameof(ExecutorPostfix)));
         var pacer = solver.GetType("CombatSolver.SearchWorkPacer", true)!;
         var yield = pacer.GetMethod("YieldIfNeeded", BindingFlags.Instance | BindingFlags.Public)
             ?? throw new MissingMethodException(pacer.FullName, "YieldIfNeeded");
@@ -33,6 +37,12 @@ internal static class SolverThroughput
         var counter = Counters.GetValue(__instance, static _ => new Counter());
         if ((++counter.Checks & 15) == 0) observeGc!(__instance);
         return false;
+    }
+
+    private static void ExecutorPostfix(int __1)
+    {
+        if (SolverPresentation.Active)
+            GD.Print($"[SpireAutopilot] SEARCH_EXECUTOR workers={__1} live_mode={SolverLiveSearch.Enabled}");
     }
 
     internal static void AnnounceOnce()

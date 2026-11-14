@@ -23,6 +23,13 @@ public sealed class CombatBridge
 
     public string Status { get; private set; } = "等待战斗";
 
+    public bool PrepareOwnership()
+    {
+        if (!BindController()) return false;
+        SolverPresentation.Activate(_controller!);
+        return true;
+    }
+
     public SolverProgressView GetProgress()
     {
         var view = GetProgressCore();

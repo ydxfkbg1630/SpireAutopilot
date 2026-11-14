@@ -85,6 +85,11 @@ public partial class AutopilotHost : Node
         if (string.IsNullOrWhiteSpace(config.BaseUrl) || string.IsNullOrWhiteSpace(config.Model))
         { SetStatus("请填写接口 URL 和模型名。"); panel.ShowPanel(); return; }
         enabled = true;
+        SolverPresentation.WorkerLimit = config.SolverWorkerLimit;
+        SolverPresentation.MaxSpeed = config.SolverMaxSpeed;
+        SolverPresentation.LightweightDiagnostics = config.LightweightSolverDiagnostics;
+        SolverLiveSearch.Enabled = config.SolverLiveMode;
+        if (config.AutoCombat) combat.PrepareOwnership();
         panel.ShowMonitor();
         generation++;
         lastActionToken = null;
@@ -198,6 +203,7 @@ public partial class AutopilotHost : Node
             if (game.InCombat)
             {
                 SolverPresentation.WorkerLimit = config.SolverWorkerLimit;
+                SolverLiveSearch.Enabled = config.SolverLiveMode;
                 SolverPresentation.MaxSpeed = config.SolverMaxSpeed;
                 SolverPresentation.LightweightDiagnostics = config.LightweightSolverDiagnostics;
                 if (config.AutoCombat)

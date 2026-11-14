@@ -162,13 +162,16 @@ public static class SolverPresentation
         int effective = workerLimit == 0 ? original : Math.Min(original, workerLimit);
         originalWorkers = original;
         effectiveWorkers = effective;
-        if (effective >= original) return;
+        if (effective >= original && !SolverLiveSearch.Enabled) return;
         var copy = cloneSettings!.Invoke(__result, null)!;
         snapshotWorkers.SetValue(copy, effective);
+        SolverLiveSearch.Apply(copy);
         __result = (T)copy;
         if (workerLimitReported) return;
         workerLimitReported = true;
         GD.Print($"[SpireAutopilot] SOLVER_WORKER_CEILING original={original} effective={effective} scope=pilot_snapshot persisted=false");
+        if (SolverLiveSearch.Enabled)
+            GD.Print("[SpireAutopilot] LIVE_SEARCH budget_ms=20000 beam_max=64 nodes_max=50000 portfolios=false scope=pilot_snapshot");
     }
 
     private static void ActualWorkerSnapshotPostfix<T>(ref T __result) where T : class

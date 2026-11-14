@@ -11,6 +11,7 @@ internal static class SolverMemoryGuard
     private static readonly object SampleLock = new();
     private static SolverMemorySample sample;
     private static long nextSample;
+    private static long searchScopes;
 
     internal static void Install(Harmony patcher, Assembly solver)
     {
@@ -28,6 +29,7 @@ internal static class SolverMemoryGuard
         if (!SolverPresentation.Active) return;
         enableNoGcRegion = false;
         noGcRegionBudgetBytes = SolverMemoryPolicy.EpochBudget(Capture(), noGcRegionBudgetBytes);
+        Godot.GD.Print($"[SpireAutopilot] SEARCH_GC_SCOPE index={Interlocked.Increment(ref searchScopes)} ordinary_gc=true epoch_bytes={noGcRegionBudgetBytes}");
     }
 
     private static void SystemLimitPostfix(ref long __result)

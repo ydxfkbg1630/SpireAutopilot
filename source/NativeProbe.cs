@@ -90,6 +90,8 @@ public static class NativeProbe
                 await NextFrame();
 
             stage = "create_fool_test_run";
+            if (System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_PROBE_EARLY_OWNERSHIP") == "1")
+                bridge.PrepareOwnership();
             var character = ModelDb.AllCharacters.Single(c => c.Id.Entry == "FOOL");
             startTask = NGame.Instance!.StartNewSingleplayerRun(
                 Player.CreateForNewRun(character, UnlockState.all, 1UL),

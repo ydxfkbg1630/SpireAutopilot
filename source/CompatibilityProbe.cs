@@ -12,6 +12,16 @@ internal static class CompatibilityProbe
         Type controller = solver.GetType("CombatSolver.SolverController")!;
         var capture = solver.GetType("CombatSolver.SolverSettings")!.GetMethod("Capture", flags)!;
         var native = capture.Invoke(null, null)!;
+        if (SolverLiveSearch.Enabled)
+        {
+            var liveType = native.GetType();
+            foreach (var name in new[] { "UseBeamWidthPortfolio", "UseNoveltyPortfolio", "UseEarlyTurnExploration" })
+                if ((bool)liveType.GetProperty(name)!.GetValue(native)!) throw new InvalidOperationException("Live portfolio limit: " + name);
+            var liveProfile = liveType.GetProperty("Profile")!.GetValue(native)!;
+            foreach (var limit in new[] { ("BeamWidth", 64), ("MaxExpandedNodes", 50000), ("SoftTimeBudgetMilliseconds", 20000) })
+                if (Convert.ToInt64(liveProfile.GetType().GetProperty(limit.Item1)!.GetValue(liveProfile)) > limit.Item2)
+                    throw new InvalidOperationException("Live profile limit: " + limit.Item1);
+        }
         Type snapshot = native.GetType();
         var clone = snapshot.GetMethod("<Clone>$")!;
         var workers = snapshot.GetProperty("SearchMaxDegreeOfParallelism")!;
@@ -32,7 +42,7 @@ internal static class CompatibilityProbe
             hook.Invoke(null, follow);
             if ((int)workers.GetValue(follow[0])! != 16) throw new InvalidOperationException("Follow-user worker assertion failed.");
             var layer = solver.GetType("CombatSolver.SolverOverlay")!.GetField("_layer", flags)!.GetValue(null) as CanvasLayer;
-            bool hidden = layer is { Visible: false };
+            bool hidden = layer == null || !layer.Visible;
             if (!hidden) throw new InvalidOperationException("Solver overlay ownership assertion failed.");
             SolverPresentation.Restore();
             object?[] restored = { input };
