@@ -253,6 +253,13 @@ public sealed partial class GameAdapter
 
     private object CaptureCards(Node scene)
     {
+        object? completion = Member(scene, "_completionSource");
+        if (Member(completion, "Task") is Task { IsCompleted: true }
+            || Member(scene, "_screenComplete") is true)
+        { Status = "等待选牌结果进入原生动作队列。"; return new { selectionCompleted = true }; }
+        if (scene is NChooseACardSelectionScreen && Member(scene, "_openedTicks") is ulong opened
+            && Time.GetTicksMsec() - opened <= 350)
+        { Status = "等待选牌界面入场完成。"; return new { selectionEntering = true }; }
         var selected = Items(Member(scene, "_selectedCards")).OfType<CardModel>().ToArray();
         var prefs = Member(scene, "_prefs");
         var previewNames = new[] { "_previewContainer", "_upgradeSinglePreviewContainer", "_upgradeMultiPreviewContainer", "_enchantSinglePreviewContainer", "_enchantMultiPreviewContainer", "_bundlePreviewContainer" };
@@ -285,6 +292,8 @@ public sealed partial class GameAdapter
         }
         return new
         {
+            selectionScreen = scene.GetType().Name, selectionInstance = scene.GetInstanceId(),
+            selectionSession = completion == null ? (int?)null : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(completion),
             prompt = Text(Member(prefs, "Prompt")), minSelect = Member(prefs, "MinSelect"), maxSelect = Member(prefs, "MaxSelect"),
             cancelable = Member(prefs, "Cancelable"), manualConfirmation = Member(prefs, "RequireManualConfirmation"), preview,
             selected = selected.Select(SnapshotCard).ToArray(), text = VisibleTexts(scene)

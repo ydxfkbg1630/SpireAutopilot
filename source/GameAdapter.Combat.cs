@@ -12,6 +12,8 @@ using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.MonsterMoves.Intents;
 using MegaCrit.Sts2.Core.Nodes;
+using MegaCrit.Sts2.Core.Nodes.Combat;
+using MegaCrit.Sts2.Core.Nodes.Screens.CardSelection;
 using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
 using MegaCrit.Sts2.Core.Runs;
 
@@ -61,9 +63,16 @@ public sealed partial class GameAdapter
         Node? screen = ActiveScreenContext.Instance.GetCurrentScreen() as Node;
         // Selection screens deliberately precede executor-idle checks: the running action awaits this choice.
         string screenType = screen?.GetType().Name ?? "";
-        bool selection = screenType is "NCardRewardSelectionScreen" or "NCardGridSelectionScreen" or "NChooseACardSelectionScreen" or "NChooseABundleSelectionScreen" or "NDeckCardSelectScreen" or "NSimpleCardSelectScreen" or "NDeckUpgradeSelectScreen";
+        bool selection = screen is ICardSelectionScreen or NCardGridSelectionScreen or NCardRewardSelectionScreen or NChooseABundleSelectionScreen;
         object? choice = null;
         if (selection && screen != null && LiveVisible(screen)) choice = CaptureCards(screen);
+        else if ((screen == null || screenType == "NCombatRoom" || screen is NPlayerHand)
+            && NPlayerHand.Instance is { IsInCardSelection: true } selectingHand && LiveVisible(selectingHand))
+        {
+            selection = true;
+            screenType = "HandCardSelect";
+            choice = CaptureHandSelection(selectingHand);
+        }
         else
         {
             if (screen != null && (IsBlocked(screenType) || screenType.Contains("Selection", StringComparison.Ordinal) || screenType != "NCombatRoom"))
@@ -108,7 +117,7 @@ public sealed partial class GameAdapter
                 RunManager.Instance.ActionQueueSynchronizer.RequestEnqueue(new EndPlayerTurnAction(player, player.PlayerCombatState.TurnNumber));
             });
         }
-        if (actions.Count == 0) { Status = "等待原生可用战斗动作。"; return null; }
+        if (actions.Count == 0) { if (!selection) Status = "等待原生可用战斗动作。"; return null; }
         object state = new { observation = CombatSnapshot(combat, player), choice, combatIdentity = CombatIdentity,
             runKey = CombatRunKey(combat), combat.RunState.CurrentActIndex, combat.RunState.TotalFloor,
             player = SnapshotPlayer(player), currentMapPoint = combat.RunState.CurrentMapCoord is { } coordinate ? new { row = coordinate.row, column = coordinate.col } : null,

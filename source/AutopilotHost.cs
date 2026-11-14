@@ -58,6 +58,8 @@ public partial class AutopilotHost : Node
             _ = ModelCombatProbe.RunAsync(this);
         else if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_HYBRID_PROBE")))
             _ = HybridCombatProbe.RunAsync(this);
+        else if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_CARD_CHOICE_PROBE")))
+            _ = CardChoiceProbe.RunAsync(this);
         else if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_SCENE_PROBE")))
             _ = SceneProbe.RunAsync(this);
         else if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_PROBE")))
@@ -198,7 +200,7 @@ public partial class AutopilotHost : Node
         "NRestSiteRoom" => "选择休息安排",
         "NStandardMerchantRoom" or "NMerchantInventory" => "评估商店商品",
         "NDeckUpgradeSelectScreen" => "选择升级卡牌",
-        "NDeckCardSelectScreen" or "NSimpleCardSelectScreen" => "评估当前选牌",
+        "NDeckCardSelectScreen" or "NSimpleCardSelectScreen" or "NCombatPileCardSelectScreen" or "HandCardSelect" => "评估当前选牌",
         "NTreasureRoom" => "领取宝箱奖励",
         _ => "评估当前局面"
     };
