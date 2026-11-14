@@ -1,0 +1,20 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>13.0</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <GameData Condition="'$(GameData)' == ''">$(STS2_GAME_DATA)</GameData>
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <Version>0.4.1</Version>
+  </PropertyGroup>
+  <Target Name="CheckGameData" BeforeTargets="ResolveAssemblyReferences"><Error Condition="!Exists('$(GameData)/sts2.dll')" Text="Set GameData or STS2_GAME_DATA to the installed game data_sts2_windows_x86_64 directory." /></Target>
+  <ItemGroup>
+    <Compile Remove="tests/**/*.cs" />
+    <Reference Include="sts2" HintPath="$(GameData)/sts2.dll" Private="false" />
+    <Reference Include="0Harmony" HintPath="$(GameData)/0Harmony.dll" Private="false" />
+    <Reference Include="GodotSharp" HintPath="$(GameData)/GodotSharp.dll" Private="false" />
+  </ItemGroup>
+</Project>
+

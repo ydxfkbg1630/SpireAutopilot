@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+  <ItemGroup>
+    <Compile Include="SingleDecisionProgram.cs" />
+    <Compile Include="../AutopilotConfig.cs" Link="AutopilotConfig.cs" />
+    <Compile Include="../ProviderClient.cs" Link="ProviderClient.cs" />
+    <Compile Include="../DecisionContracts.cs" Link="DecisionContracts.cs" />
+  <Compile Include="../AgentSession.cs" /></ItemGroup>
+</Project>
+

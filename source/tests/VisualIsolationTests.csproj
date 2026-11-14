@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <GameData Condition="'$(GameData)' == ''">$(STS2_GAME_DATA)</GameData>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="VisualIsolationProgram.cs" />
+    <Compile Include="../SimulationVisualIsolation.cs" />
+    <Reference Include="0Harmony" HintPath="$(GameData)/0Harmony.dll" />
+  </ItemGroup>
+</Project>

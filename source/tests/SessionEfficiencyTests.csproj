@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><StartupObject>SessionEfficiencyProgram</StartupObject></PropertyGroup>
+  <ItemGroup><Compile Include="SessionEfficiencyProgram.cs" /><Compile Include="../DecisionContracts.cs" /><Compile Include="../DecisionContext.cs" /><Compile Include="../RoutePlanner.cs" /><Compile Include="../ProviderClient.cs" /><Compile Include="../AgentSession.cs" /><Compile Include="../AutopilotConfig.cs" /><Compile Include="../LocalDecisionPolicy.cs" /></ItemGroup>
+</Project>

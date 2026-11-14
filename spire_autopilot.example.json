@@ -1,0 +1,22 @@
+{
+  "BaseUrl": "https://api.deepseek.com",
+  "Model": "deepseek-flash",
+  "ApiMode": "Responses",
+  "PersistentSession": true,
+  "SessionMaxTurns": 12,
+  "SessionMaxInputBytes": 102400,
+  "SessionMaxHistoryRatio": 2.5,
+  "LocalMechanicalActions": true,
+  "Strategy": "优先生存并完成整局，根据牌组、生命、遗物、金币和后续地图规划；优先选择有效配合，合理休息升级与删牌。",
+  "RequestTimeoutSeconds": 90,
+  "DecisionDelaySeconds": 1,
+  "AutoCombat": true,
+  "SolverWorkerLimit": 0,
+  "SolverMaxSpeed": true,
+  "BroadcastMode": true,
+  "LightweightSolverDiagnostics": true,
+  "AllowNativeUiFallback": true,
+  "ThinkingEnabled": false,
+  "UseJsonMode": true,
+  "ApiKeyProtected": ""
+}

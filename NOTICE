@@ -1,0 +1,11 @@
+SpireAutopilot
+Copyright 2026 SpireAutopilot contributors
+
+Original SpireAutopilot source code is licensed under the Apache License,
+Version 2.0. This distribution references externally installed game and mod
+assemblies, which remain subject to their respective terms and licenses.
+
+Slay the Spire 2 is a game by Mega Crit. CombatSolver, RitsuLib,
+FoolSolverCompat, Godot, and Harmony are separate third-party projects.
+Their names identify compatibility and dependencies. This project is a
+community mod.
