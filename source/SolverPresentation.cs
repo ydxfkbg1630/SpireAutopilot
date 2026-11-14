@@ -160,7 +160,6 @@ public static class SolverPresentation
         if (!IsOwnedCombat()) return;
         int original = (int)snapshotWorkers!.GetValue(__result)!;
         int effective = workerLimit == 0 ? original : Math.Min(original, workerLimit);
-        effective = SolverMemoryGuard.EffectiveWorkerLimit(effective);
         originalWorkers = original;
         effectiveWorkers = effective;
         if (effective >= original) return;
@@ -278,3 +277,4 @@ public static class SolverPresentation
         }
     }
 }
+

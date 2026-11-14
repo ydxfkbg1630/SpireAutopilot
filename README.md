@@ -28,7 +28,7 @@ API Key 通过当前 Windows 用户的 DPAPI 加密保存在 `%APPDATA%/SlayTheS
 
 直播小窗只显示当前阶段及当前决策摘要；战斗期间显示求解器搜索时间、节点或出牌进度。F8 高级页提供详细用量与会话统计。领航接管期间统一使用精简窗口，暂停时恢复求解器界面。
 
-0.4.1 加入自适应内存保护：搜索使用常规 GC，分配检查周期为 256 MiB 至 1 GiB；根据当前物理与系统提交余量调整新搜索并行数，在原生回收边界释放缓存并继续搜索。该周期是分配检查预算，实际进程内存包含游戏资源和各模组对象。默认保留至少 2 GiB 或物理内存 10% 的系统余量，以及 1 GiB 提交余量。
+0.4.3 的内存管理使用常规 GC，分配检查周期上限为 4 GiB；由求解器原生调度器结合可复用堆和当前余量安排任务，在原生回收边界释放缓存并继续搜索。工作线程数沿用求解器设置或用户手动上限。周期是分配检查预算，实际进程内存包含游戏资源和各模组对象。默认保留至少 2 GiB 或物理内存 10% 的系统余量，以及 1 GiB 提交余量。
 
 同时兼容奶蛙愚者皮肤：预测计算期间隔离其 Spine 动画查询，实际出牌仍播放皮肤动画。
 
@@ -65,4 +65,5 @@ dotnet run --project source/tests/MemoryTests.csproj
 请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [SECURITY.md](SECURITY.md)。SpireAutopilot 的原创代码按 **Apache License 2.0** 发布，详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
 
 CombatSolver、RitsuLib、FoolSolverCompat、Godot、Harmony 以及游戏本体分别遵循各自的许可证或使用条款。本项目引用游戏的本地程序集，并通过运行时反射衔接 CombatSolver。游戏资源与这些第三方依赖由各自官方渠道提供。
+
 

@@ -24,10 +24,8 @@ internal static class SolverMemoryPolicy
         return Math.Min(original, used > long.MaxValue - available ? long.MaxValue : Math.Max(1, used + available));
     }
     internal static long EpochBudget(SolverMemorySample sample, long requested)
-        => sample.Valid ? Math.Min(requested, Math.Clamp(Headroom(sample) / 4, 256 * MiB, GiB))
-            : Math.Min(requested, GiB);
-    internal static int WorkerLimit(SolverMemorySample sample, int requested)
-        => sample.Valid ? (int)Math.Clamp(Headroom(sample) / (384 * MiB), 1, Math.Max(1, requested))
-            : requested;
+        => Math.Min(requested, 4 * GiB);
 }
+
+
 

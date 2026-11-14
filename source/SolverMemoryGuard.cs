@@ -1,12 +1,10 @@
 using System.Reflection;
 using System.Runtime.InteropServices;
-using Godot;
 using HarmonyLib;
-using MegaCrit.Sts2.Core.Nodes;
 
 namespace SpireAutopilot;
 
-/// <summary>Uses the solver's drained reclamation boundaries and adaptive worker admission.</summary>
+/// <summary>Uses the solver's drained reclamation boundaries with the configured worker count.</summary>
 internal static class SolverMemoryGuard
 {
     private const BindingFlags Static = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
@@ -37,9 +35,6 @@ internal static class SolverMemoryGuard
         if (SolverPresentation.Active) __result = SolverMemoryPolicy.SystemLimit(Capture(), __result);
     }
 
-    internal static int EffectiveWorkerLimit(int requested)
-        => SolverPresentation.Active ? SolverMemoryPolicy.WorkerLimit(Capture(), requested) : requested;
-
     private static SolverMemorySample Capture()
     {
         lock (SampleLock)
@@ -69,4 +64,6 @@ internal static class SolverMemoryGuard
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool GlobalMemoryStatusEx(ref MemoryStatus status);
 }
+
+
 
