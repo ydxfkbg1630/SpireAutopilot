@@ -128,6 +128,10 @@ public sealed partial class GameAdapter
             description = model is RelicModel relic ? relic.HoverTip.Description : model is PotionModel potion ? potion.HoverTip.Description
                 : model is PowerModel power ? power.GetDumbHoverTip().Description : Text(Member(model, "DynamicDescription") ?? Member(model, "Description")), rarity = Text(Member(model, "Rarity")),
             amount = Member(model, "Amount")?.ToString(), counter = Member(model, "DisplayAmount")?.ToString(),
+            status = model is RelicModel statusRelic ? statusRelic.Status.ToString() : null,
+            isUsedUp = model is RelicModel usedRelic ? (bool?)usedRelic.IsUsedUp : null,
+            isMelted = model is RelicModel meltedRelic ? (bool?)meltedRelic.IsMelted : null,
+            relatedEffects = SnapshotRelatedEffects(model),
             // Dynamic amounts support relic counters and mod model data without serializing native object graphs.
             dynamicVars = SnapshotDynamicVars(Member(model, "DynamicVars"))
         };
@@ -140,6 +144,8 @@ public sealed partial class GameAdapter
         catch { description = Text(card.Description); }
         string? upgrade = null;
         int? upgradeCost = null;
+        int? upgradeStarCost = null;
+        bool? upgradeCostsStarX = null;
         string? upgradeName = null;
         string? upgradePreviewError = null;
         if (card.IsUpgradable)
@@ -152,6 +158,8 @@ public sealed partial class GameAdapter
                 preview.UpgradeInternal();
                 upgrade = preview.GetDescriptionForPile(PileType.Deck);
                 upgradeCost = preview.EnergyCost.GetResolved();
+                upgradeStarCost = preview.CurrentStarCost;
+                upgradeCostsStarX = preview.HasStarCostX;
                 upgradeName = preview.Title;
             }
             catch (Exception ex) { upgradePreviewError = ex.GetType().Name; }
@@ -159,14 +167,18 @@ public sealed partial class GameAdapter
         return new
         {
             id = card.Id.ToString(), name = card.Title, description, upgradeDescription = upgrade,
-            upgradeCost, upgradeName, canUpgrade = card.IsUpgradable, upgradePreviewError,
+            upgradeCost, upgradeStarCost, upgradeCostsStarX, upgradeName, canUpgrade = card.IsUpgradable, upgradePreviewError,
             type = card.Type.ToString(), rarity = card.Rarity.ToString(), card.IsUpgraded,
             upgradeLevel = card.CurrentUpgradeLevel, cost = card.EnergyCost.GetResolved(), costsX = card.EnergyCost.CostsX,
+            starCost = card.CurrentStarCost, baseStarCost = card.BaseStarCost, costsStarX = card.HasStarCostX,
             keywords = Items(Member(card, "Keywords")).Select(Text).ToArray(), dynamicVars = SnapshotDynamicVars(card.DynamicVars),
-            relatedEffects = Items(Member(card, "HoverTips")).Select(t => new { name = Text(Member(t, "Title")), description = Text(Member(t, "Description")) }).ToArray(),
+            relatedEffects = SnapshotRelatedEffects(card),
             enchantment = SnapshotSimpleModel(Member(card, "Enchantment")), affliction = SnapshotSimpleModel(Member(card, "Affliction"))
         };
     }
+
+    private static object[] SnapshotRelatedEffects(object model) => Items(Member(model, "HoverTips"))
+        .Select(t => (object)new { name = Text(Member(t, "Title")), description = Text(Member(t, "Description")) }).ToArray();
 
     private static object? SnapshotSimpleModel(object? model) => model == null ? null : new { id = Text(Member(model, "Id")), amount = Text(Member(model, "Amount")), name = ModelTitle(model) };
 

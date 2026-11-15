@@ -40,7 +40,7 @@ foreach (string scene in new[] { "Map", "Shop", "Event", "Reward", "Combat", "Ot
 for (int i = 0; i < 30; i++) store.RecordDecision(scene, new string('行', 180), new string('理', 180));
 var bounded = store.CreateReflectionFrame(new { result = "defeat", floor = 31 })!;
 Check(((JsonArray)((JsonObject)bounded.State)["entries"]!).Count <= 120, "journal bounded");
-Check(new FileInfo(Directory.GetFiles(directory, "checkpoint-*.json").Single()).Length <= 128 * 1024, "checkpoint bytes bounded");
+Check(new FileInfo(Directory.GetFiles(directory, "checkpoint-*.json").Single()).Length <= 1024 * 1024, "checkpoint bytes bounded");
 Check(!store.CommitReflection(bounded.Token, new ModelDecision("write_run_experience", "", RunExperienceNote: new string('字', 6001)), null), "overlong report rejected");
 Check(store.CommitReflection(bounded.Token, new ModelDecision("write_run_experience", "", RunExperienceNote: new string('字', 6000)), null), "6000 unicode accepted");
 Check(Directory.GetFiles(directory, "*.md").Length == 1, "one rolling document after two runs");
@@ -131,4 +131,15 @@ for (int i = 0; i < 257; i++)
     File.WriteAllText(Path.Combine(backlogDir, "checkpoint-" + id + ".json"), checkpoint.ToJsonString());
 }
 Check(new RunExperienceStore(backlogDir).HasPendingReflection, "old interrupted runs do not hide a newer pending update");
+foreach (string negative in new[] { "无法确认牌组", "不建议购买", "没有足够信息", "仅供参考", "记录不足，待验证", "未见击杀过程", "请避免战斗", "Unknown effects", "Do not buy" })
+    Check(!ExperienceSummaryRules.Accepts(negative), "negative or defensive prose requests a rewrite");
+Check(ExperienceSummaryRules.Accepts("无色牌与不屈可分别按费用比较，优先规划未来回合。"), "game terms and affirmative applicability remain valid");
+string fullDir = Path.Combine(directory, "complete-effects"); var fullStore = new RunExperienceStore(fullDir);
+var fullDeck = new JsonArray(Enumerable.Range(0, 80).Select(i => (JsonNode)new JsonObject { ["id"] = "CARD.TEST" + i, ["description"] = new string('效', 180) + i, ["relatedEffects"] = new JsonArray(new JsonObject { ["description"] = "关联效果末尾" + i }) }).ToArray());
+var completeSnapshot = new JsonObject { ["player"] = new JsonObject { ["deck"] = fullDeck, ["relics"] = new JsonArray(new JsonObject { ["id"] = "RELIC.TEST", ["description"] = new string('遗', 200), ["relatedEffects"] = new JsonArray("瞄准关联说明") }) } };
+fullStore.BeginRun("complete-effects", completeSnapshot);
+var fullFrame = fullStore.CreateReflectionFrame(completeSnapshot)!;
+Check(JsonNode.DeepEquals(((JsonObject)fullFrame.State)["start"], completeSnapshot), "full native card and relic descriptions survive reflection capture");
+Check(JsonNode.DeepEquals(((JsonObject)fullFrame.State)["outcome"], completeSnapshot), "full final build reaches reflection evidence");
+Check(!fullStore.CommitReflection(fullFrame.Token, new ModelDecision("write_run_experience", "", RunExperienceNote: "无法确认构筑"), null), "storage enforces affirmative prose");
 Console.WriteLine($"Run experience tests passed: {checks}; evidence: {directory}");

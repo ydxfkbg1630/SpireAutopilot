@@ -58,5 +58,86 @@ Test("combat and card-choice context retain effects, piles, position and lessons
     var choice = context.Prepare(raw with { Scene = "NSimpleCardSelectScreen" }, route);
     Check(JsonNode.DeepEquals(JsonSerializer.SerializeToNode(choice.FullState)!["game"], game), "card selection retains complete same battle context");
 });
+Test("HTTP payload reconstructs latest full state and effects across patch, rebase and retry", () =>
+{
+    foreach (string protocol in new[] { "Responses", "ChatCompletions" })
+    foreach (int maxTurns in new[] { 1, 12 })
+    {
+        JsonObject? receipt = null;
+        using var handler = new ContextHandler(); using var http = new HttpClient(handler); using var client = new ProviderClient(http);
+        client.RequestPrepared += r => receipt = r;
+        var config = new AutopilotConfig { BaseUrl = "https://example.test/v1", Model = "test", ApiKey = "private-context-key", ApiMode = protocol, SessionMaxTurns = maxTurns };
+        var context = new DecisionContext(); var planner = new RoutePlanner();
+        var raw = Frame(); planner.Observe(raw, "safe"); planner.Accept(raw, Plan());
+        for (int step = 0; step < 3; step++)
+        {
+            var state = (JsonObject)((JsonObject)raw.State).DeepClone();
+            state["player"]!["hp"] = 70 - step;
+            var card = Card(); card["description"] = "Current damage " + (6 + step); card["starCost"] = step; card["upgradeStarCost"] = 4;
+            state["player"]!["deck"] = new JsonArray(card);
+            state["player"]!["relics"] = new JsonArray(new JsonObject { ["id"] = "RELIC.AIM", ["description"] = "Gain aim", ["counter"] = step, ["relatedEffects"] = new JsonArray(new JsonObject { ["description"] = "Aim multiplies arrow damage" }) });
+            var actions = new[] { new LegalAction("choose-" + step, "Select card", "card", card.DeepClone()) };
+            var prepared = context.Prepare(raw with { Token = "wire-" + step, State = state, Scene = "NSimpleCardSelectScreen", Actions = actions }, planner);
+            client.DecideAsync(config, prepared, CancellationToken.None).GetAwaiter().GetResult();
+            Check(JsonNode.DeepEquals(receipt!["httpBody"], handler.Body), "receipt is the actual serialized HTTP body");
+            Check(!receipt.ToJsonString().Contains(config.ApiKey), "context receipt excludes authorization");
+            var rebuilt = ContextHandler.Rebuild(handler.Body!, protocol);
+            Check(JsonNode.DeepEquals(rebuilt.Game, JsonSerializer.SerializeToNode(prepared.FullState)!["game"]), "wire history reconstructs the exact latest native DTO");
+            Check(JsonNode.DeepEquals(rebuilt.Stable, JsonSerializer.SerializeToNode(prepared.FullStableContext)), "wire history reconstructs the entire map and card dictionary");
+            Check(rebuilt.Actions!.Single()!["id"]!.ToString() == "choose-" + step, "wire legal actions match the latest screen");
+            Check(rebuilt.Stable!.ToJsonString().Contains("Aim multiplies arrow damage") == false, "live relic data stays in current game state");
+            Check(rebuilt.Game!.ToJsonString().Contains("Aim multiplies arrow damage"), "relic terminology reaches the model");
+            if (step == 1)
+            {
+                client.DiscardLastDecision();
+                client.DecideAsync(config, prepared, CancellationToken.None).GetAwaiter().GetResult();
+                Check(JsonNode.DeepEquals(ContextHandler.Rebuild(handler.Body!, protocol).Game, rebuilt.Game), "retry retains the same current full state");
+            }
+            context.Commit(prepared);
+        }
+    }
+});
 Console.WriteLine($"RESULT passed={passed} failed={failures.Count}");
 return failures.Count == 0 ? 0 : 1;
+
+sealed class ContextHandler : HttpMessageHandler
+{
+    public JsonObject? Body { get; private set; }
+    protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken token)
+    {
+        Body = JsonNode.Parse(await request.Content!.ReadAsStringAsync(token))!.AsObject();
+        bool responses = Body.ContainsKey("input");
+        var latest = Rebuild(Body, responses ? "Responses" : "ChatCompletions");
+        string id = latest.Actions!.Single()!["id"]!.ToString();
+        string text = JsonSerializer.Serialize(new { actionId = id, reason = "current state" });
+        object result = responses ? new { output_text = text } : (object)new { choices = new[] { new { message = new { role = "assistant", content = text } } } };
+        return new HttpResponseMessage(System.Net.HttpStatusCode.OK) { Content = new StringContent(JsonSerializer.Serialize(result)) };
+    }
+    public static (JsonNode? Game, JsonNode? Stable, JsonArray? Actions) Rebuild(JsonObject body, string protocol)
+    {
+        JsonNode? game = null, stable = null; JsonArray? actions = null;
+        foreach (var item in (JsonArray)body[protocol == "Responses" ? "input" : "messages"]!)
+        {
+            if (item?["role"]?.ToString() != "user") continue;
+            var envelope = JsonNode.Parse(item["content"]!.ToString())!;
+            if (envelope["stableContext"] != null) stable = envelope["stableContext"]!.DeepClone();
+            if (envelope["contextUpdate"] is JsonObject updates)
+                foreach (var pair in updates)
+                    if (pair.Key == "newCardDefinitions") foreach (var def in (JsonArray)pair.Value!) ((JsonArray)stable!["cardDictionary"]!).Add(def!.DeepClone());
+                    else stable![pair.Key] = pair.Value?.DeepClone();
+            if (envelope["state"] is not JsonObject state) continue;
+            actions = envelope["actions"]!.DeepClone().AsArray();
+            if (state["updateType"]?.ToString() == "snapshot") game = state["game"]?.DeepClone();
+            else foreach (var patch in (JsonArray)state["gamePatch"]!)
+            {
+                var path = patch!["path"]!.ToString();
+                if (path == "") { game = patch["value"]?.DeepClone(); continue; }
+                var parts = path[1..].Split('/').Select(s => s.Replace("~1", "/").Replace("~0", "~")).ToArray();
+                JsonNode parent = game!; foreach (var name in parts[..^1]) parent = parent[name]!;
+                if (patch["op"]!.ToString() == "remove") parent.AsObject().Remove(parts[^1]);
+                else parent[parts[^1]] = patch["value"]?.DeepClone();
+            }
+        }
+        return (game, stable, actions);
+    }
+}

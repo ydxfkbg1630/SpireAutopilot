@@ -55,3 +55,7 @@ dotnet run --project source/tests/VisualIsolationTests.csproj
 ## 诊断构建
 
 发行构建仅包含运行功能。需要实机探针时，构建附加 `-p:EnableDiagnostics=true`；环境变量与探针产物仅用于本地联调。
+
+## 请求上下文
+
+F8 → 高级 → 查看本次模型上下文，显示当前完整快照、卡牌字典、合法动作及实际序列化请求体。文件随每次模型请求覆盖，授权头与密钥独立处理。游戏运行期间的下一次请求生成该文件；HTTP补丁沿完整会话重建当前状态。

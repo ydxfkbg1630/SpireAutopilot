@@ -25,3 +25,5 @@ spire_autopilot_run_experience.legacy/
 *.tmp
 
 artifacts/
+
+spire_autopilot_model_context.json

@@ -560,6 +560,20 @@ await Test("map planning requires the model selected full route before session c
     Check(counts.SequenceEqual(new[] { 3, 3 }), "incomplete map proposal stays outside session");
 });
 
+await Test("reflection rejects defensive prose and accepts actionable affirmative guidance", async () =>
+{
+    var frame = new DecisionFrame("reflection", "RunReflection", new { previousExperience = "经验" }, new[] { new LegalAction("write_run_experience", "更新", "reflection") });
+    using var handler = new FakeHandler(async (request, ct) =>
+    {
+        var body = await request.Content!.ReadAsStringAsync(ct);
+        Check(body.Contains("writingStyle") || body.Contains("肯定句") || body.Contains("\\u80AF"), "affirmative policy is sent");
+        return Chat(JsonSerializer.Serialize(new { actionId = "write_run_experience", runExperienceNote = "无法确认牌组，仅供参考" }));
+    });
+    using var http = new HttpClient(handler); using var client = new ProviderClient(http);
+    await Throws<ModelProtocolException>(() => client.DecideAsync(Config(), frame, CancellationToken.None));
+    Check(client.LastRejectedExperienceToken == frame.Token && client.LastRejectedExperienceNote!.Contains("无法"), "rewrite draft is scoped to the exact pending reflection");
+    Check(ExperienceSummaryRules.Accepts("生命低于20时优先安排休息，回复后再进入精英房。"), "affirmative conditional guidance accepted");
+});
 Console.WriteLine($"RESULT passed={passed} failed={failures.Count}");
 foreach (var failure in failures) Console.WriteLine(failure);
 return failures.Count == 0 ? 0 : 1;

@@ -9,7 +9,7 @@ namespace SpireAutopilot;
 /// <summary>One rolling summary; run checkpoints survive interrupted updates.</summary>
 public sealed class RunExperienceStore
 {
-    private const int MaximumEntries = 120, MaximumCheckpointBytes = 128 * 1024, MaximumNoteCharacters = 6000;
+    private const int MaximumEntries = 120, MaximumCheckpointBytes = 1024 * 1024, MaximumNoteCharacters = 6000;
     private const string SummaryMarker = "<!-- spire-autopilot-experience:";
     private const string LegacyMarker = "<!-- spire-autopilot-run:";
     private string SummaryPath => Path.Combine(directory, "experience.md");
@@ -137,6 +137,7 @@ public sealed class RunExperienceStore
                 var state = new JsonObject
                 {
                     ["task"] = "将旧逐局记录合并到总体经验总结。保留适用条件，合并重复项，修正冲突；填写完整runExperienceNote（中文Markdown，最多6000字符）。",
+                    ["writingStyle"] = ExperienceSummaryRules.Instruction,
                     ["previousExperience"] = summary.Text,
                     ["legacyNotes"] = new JsonArray(migration.Select(n => (JsonNode)new JsonObject { ["id"] = n.Id, ["text"] = n.Text }).ToArray()),
                 };
@@ -148,6 +149,7 @@ public sealed class RunExperienceStore
             if (!pendingRuns.TryPeek(out var pending)) { frame = null; return null; }
             var evidence = (JsonObject)pending.DeepClone();
             evidence["previousExperience"] = summary.Text;
+            evidence["writingStyle"] = ExperienceSummaryRules.Instruction;
             evidence["task"] = "根据本局记录更新总体经验总结。保留仍适用的经验，合并重复项，修正旧结论，标明角色、牌组与适用条件；区分观测与推断。填写完整runExperienceNote（中文Markdown，最多6000字符），用于替换原总结。";
             return frame = new DecisionFrame(ReflectionToken(pending, summary.Hash), "RunReflection", evidence,
                 new[] { new LegalAction("write_run_experience", "更新经验总结", "reflection") });
@@ -163,7 +165,7 @@ public sealed class RunExperienceStore
             string clean = Clean(decision.RunExperienceNote, int.MaxValue, actualApiKey)
                 .Replace(SummaryMarker, "[经验标记]", StringComparison.Ordinal)
                 .Replace(LegacyMarker, "[经验标记]", StringComparison.Ordinal).Trim();
-            if (string.IsNullOrWhiteSpace(clean) || clean.Length > MaximumNoteCharacters) return false;
+            if (!ExperienceSummaryRules.Accepts(clean) || clean.Length > MaximumNoteCharacters) return false;
             Directory.CreateDirectory(directory);
             using var writeLock = new FileStream(Path.Combine(directory, ".experience.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             Summary summary = ReadSummary();
@@ -200,6 +202,19 @@ public sealed class RunExperienceStore
             RetireCompleted(new Summary(clean, Hash(content), summary.Runs));
             frame = null; migration = null; expectedSummaryHash = null;
             return true;
+        }
+    }
+
+    public DecisionFrame CreateRevisionFrame()
+    {
+        lock (gate)
+        {
+            Summary summary = ReadSummary();
+            expectedSummaryHash = summary.Hash;
+            migration = new();
+            return frame = new DecisionFrame("experience-revision:" + summary.Hash, "RunReflection",
+                new { task = "整理现有经验总结，保留有效策略与实际数值，以具体行动和适用条件表达。填写完整runExperienceNote，最多6000字符。", previousExperience = summary.Text, writingStyle = ExperienceSummaryRules.Instruction },
+                new[] { new LegalAction("write_run_experience", "整理经验总结", "reflection") });
         }
     }
 
@@ -274,7 +289,7 @@ public sealed class RunExperienceStore
     {
         ((JsonArray)run!["entries"]!).Add(entry);
         var entries = (JsonArray)run["entries"]!;
-        while (entries.Count > MaximumEntries || Encoding.UTF8.GetByteCount(run.ToJsonString()) > MaximumCheckpointBytes - 12 * 1024)
+        while (entries.Count > MaximumEntries || Encoding.UTF8.GetByteCount(run.ToJsonString()) > MaximumCheckpointBytes - 512 * 1024)
         {
             if (entries.Count == 0) break;
             entries.RemoveAt(0); run["droppedEntries"] = run["droppedEntries"]!.GetValue<int>() + 1;
@@ -359,11 +374,31 @@ public sealed class RunExperienceStore
         try
         {
             JsonNode? node = value is JsonNode json ? json.DeepClone() : JsonSerializer.SerializeToNode(value, new JsonSerializerOptions { MaxDepth = 24 });
-            return Bound(node, 0, 10 * 1024);
+            JsonNode? clean = Sanitize(node);
+            if (clean == null || Encoding.UTF8.GetByteCount(clean.ToJsonString()) <= 256 * 1024) return clean;
+            return new JsonObject { ["captureStatus"] = "size_bounded", ["originalBytes"] = Encoding.UTF8.GetByteCount(clean.ToJsonString()), ["data"] = Bound(clean, 0, 256 * 1024) };
         }
         catch (JsonException) { return JsonValue.Create("snapshot exceeded JSON shape bounds"); }
         catch (NotSupportedException) { return JsonValue.Create("snapshot type outside JSON DTO contract"); }
     }
+    private static JsonNode? Sanitize(JsonNode? node)
+    {
+        if (node is JsonObject obj)
+        {
+            JsonObject result = new();
+            foreach (var pair in obj)
+            {
+                string key = pair.Key.Replace("_", "", StringComparison.Ordinal).ToLowerInvariant();
+                if (key.Contains("apikey") || key.Contains("authorization") || key.Contains("password") || key.Contains("secret") || key.Contains("header") || key.Contains("accesstoken")) continue;
+                result[pair.Key] = Sanitize(pair.Value);
+            }
+            return result;
+        }
+        if (node is JsonArray array) return new JsonArray(array.Select(Sanitize).ToArray());
+        if (node is JsonValue scalar && scalar.TryGetValue<string>(out var text)) return JsonValue.Create(Clean(text, int.MaxValue));
+        return node?.DeepClone();
+    }
+
     private static JsonNode? Bound(JsonNode? node, int depth, int budget)
     {
         if (node == null || budget < 12) return null;

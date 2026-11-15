@@ -50,6 +50,8 @@ public partial class AutopilotHost : Node
         if (route.RestoreDiagnostic is { } routeDiagnostic) GD.Print("[SpireAutopilot] " + routeDiagnostic);
         runExperience = new RunExperienceStore(Path.Combine(OS.GetUserDataDir(), "spire_autopilot_run_experience"));
         if (runExperience.RestoreDiagnostic is { } experienceDiagnostic) GD.Print("[SpireAutopilot] " + experienceDiagnostic);
+        provider.RequestPrepared += SaveModelContext;
+        reflectionProvider.RequestPrepared += SaveModelContext;
         panel = new AutopilotPanel();
         AddChild(panel);
         panel.Initialize(config, SaveConfig, Toggle, TestConnection);
@@ -114,6 +116,19 @@ public partial class AutopilotHost : Node
         nextPoll = clock + .5;
         _ = TickAsync();
     }
+    private void SaveModelContext(JsonObject receipt)
+    {
+        string path = Path.Combine(OS.GetUserDataDir(), "spire_autopilot_model_context.json");
+        string temporary = path + ".tmp";
+        try
+        {
+            File.WriteAllText(temporary, Redact(receipt.ToJsonString(new JsonSerializerOptions { WriteIndented = true })));
+            File.Move(temporary, path, true);
+        }
+        catch (IOException error) { GD.PrintErr("[SpireAutopilot] Context receipt: " + error.GetType().Name); }
+        finally { if (File.Exists(temporary)) File.Delete(temporary); }
+    }
+
     private void SaveConfig(AutopilotConfig value)
     {
         Pause("配置已保存，F9 开始领航。");
@@ -290,6 +305,14 @@ public partial class AutopilotHost : Node
             {
                 var reflectionFrame = runExperience.CreateReflectionFrame(null);
                 if (reflectionFrame == null) return;
+                if (reflectionProvider.LastRejectedExperienceToken == reflectionFrame.Token
+                    && reflectionProvider.LastRejectedExperienceNote is { Length: > 0 } draft)
+                {
+                    var revisedState = JsonSerializer.SerializeToNode(reflectionFrame.State)!.AsObject();
+                    revisedState["draftToRevise"] = draft;
+                    revisedState["requiredRewrite"] = "将包含‘" + ExperienceSummaryRules.Violation(draft) + "’的句子改为肯定句和具体行动，返回完整经验正文。";
+                    reflectionFrame = reflectionFrame with { State = revisedState };
+                }
                 BeginModelDecision("RunReflection", reflectionFrame.Token);
                 bool reflectionReturned = false;
                 bool reflectionAccepted = false;

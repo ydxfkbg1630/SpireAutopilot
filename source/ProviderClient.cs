@@ -12,6 +12,9 @@ public sealed class ProviderClient : IDisposable
     private readonly HttpClient _http;
     private readonly bool _ownsClient;
     private readonly AgentSession session = new();
+    public event Action<JsonObject>? RequestPrepared;
+    public string? LastRejectedExperienceNote { get; private set; }
+    public string? LastRejectedExperienceToken { get; private set; }
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -49,8 +52,8 @@ public sealed class ProviderClient : IDisposable
         var proposal = session.Prepare(identity, responses, openAiServer, stableInput, fullStableInput, volatileInput, fullVolatileInput,
             config.SessionMaxTurns, config.SessionMaxInputBytes, config.SessionMaxHistoryRatio, config.PersistentSession);
         Dictionary<string, object?> body = responses
-            ? new() { ["model"] = config.Model, ["instructions"] = Instructions + SessionInstructions, ["input"] = proposal.Input }
-            : new() { ["model"] = config.Model, ["messages"] = new[] { (JsonNode)new JsonObject { ["role"] = "system", ["content"] = Instructions + SessionInstructions } }.Concat(proposal.Input).ToArray() };
+            ? new() { ["model"] = config.Model, ["instructions"] = Instructions + SessionInstructions + (frame.Scene == "RunReflection" ? " " + ExperienceSummaryRules.Instruction : ""), ["input"] = proposal.Input }
+            : new() { ["model"] = config.Model, ["messages"] = new[] { (JsonNode)new JsonObject { ["role"] = "system", ["content"] = Instructions + SessionInstructions + (frame.Scene == "RunReflection" ? " " + ExperienceSummaryRules.Instruction : "") } }.Concat(proposal.Input).ToArray() };
         if (openAiServer)
         {
             body["store"] = true;
@@ -72,6 +75,16 @@ public sealed class ProviderClient : IDisposable
             request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", config.ApiKey);
         }
         request.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
+        RequestPrepared?.Invoke(new JsonObject
+        {
+            ["capturedUtc"] = DateTimeOffset.UtcNow.ToString("O"), ["frameToken"] = frame.Token,
+            ["scene"] = frame.Scene, ["model"] = config.Model, ["protocol"] = config.ApiMode,
+            ["delivery"] = JsonSerializer.SerializeToNode(proposal.Info),
+            ["currentState"] = JsonSerializer.SerializeToNode(frame.FullState ?? frame.State),
+            ["currentStableContext"] = JsonSerializer.SerializeToNode(frame.FullStableContext ?? frame.StableContext),
+            ["legalActions"] = JsonSerializer.SerializeToNode(frame.Actions),
+            ["httpBody"] = JsonNode.Parse(JsonSerializer.Serialize(body, JsonOptions)),
+        });
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(ct);
         timeout.CancelAfter(TimeSpan.FromSeconds(Math.Clamp(config.RequestTimeoutSeconds, 1, 300)));
         try
@@ -111,6 +124,22 @@ public sealed class ProviderClient : IDisposable
                 catch (InvalidOperationException) { throw new ModelProtocolException("模型响应文本结构与当前 API 协议格式有差异。"); }
                 try
                 {
+                    if (frame.Scene == "RunReflection")
+                    {
+                        LastRejectedExperienceNote = null;
+                        LastRejectedExperienceToken = null;
+                        try
+                        {
+                            using var draft = JsonDocument.Parse(text);
+                            if (draft.RootElement.TryGetProperty("runExperienceNote", out var note) && note.ValueKind == JsonValueKind.String)
+                            {
+                                string? value = note.GetString();
+                                if (value is { Length: <= 6000 } && !ExperienceSummaryRules.Accepts(value))
+                                { LastRejectedExperienceNote = value; LastRejectedExperienceToken = frame.Token; }
+                            }
+                        }
+                        catch (JsonException) { }
+                    }
                     var decision = ParseDecision(text, frame.Actions);
                     if (scopeNode?["mapPlanningRequired"]?.GetValue<bool>() == true)
                     {
@@ -285,6 +314,8 @@ public sealed class ProviderClient : IDisposable
         if (actionId == "write_run_experience" && (!root.TryGetProperty("runExperienceNote", out var runNote)
             || runNote.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(runNote.GetString()) || runNote.GetString()!.Length > 6000))
             throw new ModelProtocolException("经验总结需包含 1 至 6000 字符的 runExperienceNote。");
+        if (actionId == "write_run_experience" && !ExperienceSummaryRules.Accepts(root.GetProperty("runExperienceNote").GetString()))
+            throw new ModelProtocolException("经验正文需改写片段：" + ExperienceSummaryRules.Violation(root.GetProperty("runExperienceNote").GetString()) + "。请使用肯定句与具体行动，返回完整runExperienceNote。");
         return new ModelDecision(actionId, Summary("reason", 500) ?? "", route, Summary("planReason", 1000), Summary("reasoningSummary", 1000), RouteOptionId: optionId, RunExperienceNote: Summary("runExperienceNote", 6000));
     }
 
