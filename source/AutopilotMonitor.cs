@@ -23,9 +23,9 @@ public partial class AutopilotMonitor : PanelContainer
         chip = new Label { Text = "待命", MouseFilter = MouseFilterEnum.Ignore }; chip.AddThemeFontSizeOverride("font_size",14); header.AddChild(chip);
         collapse = new Button { Text = "收起", TooltipText = "拖动标题移动 · F10 显示或隐藏" }; collapse.AddThemeFontSizeOverride("font_size",13); collapse.Pressed += ToggleFold; header.AddChild(collapse); header.GuiInput += HeaderInput;
         live = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill }; live.AddThemeConstantOverride("separation",6); column.AddChild(live); live.AddChild(new HSeparator());
-        phase = Wrapped("等待领航启动。",16); phase.MaxLinesVisible = 1; live.AddChild(phase);
+        phase = Wrapped("等待启动",16); phase.MaxLinesVisible = 1; live.AddChild(phase);
         scroll = new ScrollContainer { HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled, VerticalScrollMode = ScrollContainer.ScrollMode.Auto, CustomMinimumSize = new Vector2(0,76), SizeFlagsHorizontal = SizeFlags.ExpandFill }; live.AddChild(scroll);
-        decision = Wrapped("F9 开始领航。",18); scroll.AddChild(decision);
+        decision = Wrapped("F9 启停",18); scroll.AddChild(decision);
         usage = Wrapped("F8 设置    F9 启停    F10 收起",13); usage.MaxLinesVisible = 1; usage.TextOverrunBehavior = TextServer.OverrunBehavior.TrimEllipsis; usage.AddThemeColorOverride("font_color",AutopilotTheme.Muted); live.AddChild(usage); Hide();
     }
     public void BeginCurrent(string owner,string stage,string contextKey)
@@ -64,7 +64,7 @@ public partial class AutopilotMonitor : PanelContainer
     private void FitViewport() { if(initialized)Position=ClampPosition(Position); }
     private Vector2 ClampPosition(Vector2 p) {var v=GetViewportRect().Size;return new Vector2(Mathf.Clamp(p.X,8,Math.Max(8,v.X-Size.X-8)),Mathf.Clamp(p.Y,8,Math.Max(8,v.Y-Size.Y-8)));}
     public void ShowMonitor(){FitViewport();Show();} public void ToggleMonitor(){if(Visible)Hide();else ShowMonitor();}
-    public void SetPhase(string text)=>Set(phase,text); public void SetPlan(string text){} public void SetDecision(string text)=>SetCurrentDetails(text);public void SetUsage(string text)=>SetCurrentMetrics(text.Split('\n').FirstOrDefault()??"");public void SetRecent(string text){}
+    public void SetPhase(string text)=>Set(phase,text); public void SetDecision(string text)=>SetCurrentDetails(text);public void SetUsage(string text)=>SetCurrentMetrics(text.Split('\n').FirstOrDefault()??"");
     private static void Set(Label label,string text){if(label.Text!=text)label.Text=text;}
     private static Label Wrapped(string text,int size){var label=new Label{Text=text,AutowrapMode=TextServer.AutowrapMode.WordSmart,SizeFlagsHorizontal=SizeFlags.ExpandFill,CustomMinimumSize=new Vector2(306,0),MouseFilter=MouseFilterEnum.Ignore};label.AddThemeFontSizeOverride("font_size",size);return label;}
 }

@@ -35,13 +35,25 @@ public sealed partial class GameAdapter
     private readonly List<LegalAction> actions = new();
     private readonly List<Task> nativeTasks = new();
     private string? nativeFailure;
+    private bool selectionWaiting;
     public bool AllowNativeUiFallback { get; set; }
     public string Status { get; private set; } = "等待游戏场景。";
     public bool InCombat => CombatManager.Instance.IsInProgress;
     public bool RunActive => RunManager.Instance.IsInProgress;
     public bool RunFinished => RunManager.Instance.IsGameOver || RunManager.Instance.HasRunEnded;
     public string? RunIdentity => RunManager.Instance.DebugOnlyGetState() is { } run
-        ? run.Rng.StringSeed + ":" + run.Players.FirstOrDefault()?.Character.Id + ":" + run.AscensionLevel : null;
+        ? NativeRunIdentity(run) : null;
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<object, RunInstanceIdentity> UnsavedRunIds = new();
+    private sealed class RunInstanceIdentity { public string Value { get; } = Guid.NewGuid().ToString("N"); }
+    private static string NativeRunIdentity(MegaCrit.Sts2.Core.Runs.IRunState run)
+    {
+        // Native RunManager persists _startTime as SerializableRun.StartTime and restores it on continuation.
+        // Scope includes character/seed for older saves and a per-object fallback for isolated unsaved bootstraps.
+        string start = Member(RunManager.Instance, "_startTime") is long timestamp && timestamp > 0
+            ? timestamp.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : "session-" + UnsavedRunIds.GetValue(run, static _ => new RunInstanceIdentity()).Value;
+        return "run-v2:" + start + ":" + run.Rng.StringSeed + ":" + run.Players.FirstOrDefault()?.Character.Id + ":" + run.AscensionLevel;
+    }
     public object? CaptureRunObservation()
     {
         var run = RunManager.Instance.DebugOnlyGetState();
@@ -69,6 +81,7 @@ public sealed partial class GameAdapter
     {
         dispatch.Clear();
         actions.Clear();
+        selectionWaiting = false;
         foreach (var task in nativeTasks.Where(t => t.IsCompleted).ToArray())
         {
             if (task.IsFaulted) nativeFailure = task.Exception?.GetBaseException().Message;
@@ -112,7 +125,7 @@ public sealed partial class GameAdapter
         {
             extra = CaptureCrystalSphere(scene);
         }
-        else if (scene is NCardRewardSelectionScreen || scene is NCardGridSelectionScreen || sceneType is "NChooseACardSelectionScreen" or "NChooseABundleSelectionScreen")
+        else if (scene is ICardSelectionScreen or NCardRewardSelectionScreen or NCardGridSelectionScreen or NChooseABundleSelectionScreen)
         {
             extra = CaptureCards(scene);
         }
@@ -165,6 +178,7 @@ public sealed partial class GameAdapter
             if (AllowNativeUiFallback) AddNativeFallback(scene);
             extra = new { text = VisibleTexts(scene) };
         }
+        if (selectionWaiting) return null;
         if (actions.Count == 0)
         {
             if (AllowNativeUiFallback) AddNativeFallback(scene);
@@ -172,7 +186,7 @@ public sealed partial class GameAdapter
         }
         var state = new
         {
-            runKey = run.Rng.StringSeed + ":" + player.Character.Id + ":" + run.AscensionLevel,
+            runKey = NativeRunIdentity(run),
             currentMapPoint = run.CurrentMapCoord is { } coordinate ? new { row = coordinate.row, column = coordinate.col } : null,
             sceneType, sceneInstance = scene.GetInstanceId(), run.CurrentActIndex, run.ActFloor,
             run.TotalFloor, run.AscensionLevel, room = run.CurrentRoom?.GetType().Name,
@@ -256,10 +270,10 @@ public sealed partial class GameAdapter
         object? completion = Member(scene, "_completionSource");
         if (Member(completion, "Task") is Task { IsCompleted: true }
             || Member(scene, "_screenComplete") is true)
-        { Status = "等待选牌结果进入原生动作队列。"; return new { selectionCompleted = true }; }
+        { selectionWaiting = true; Status = "等待选牌结果进入原生动作队列。"; return new { selectionCompleted = true }; }
         if (scene is NChooseACardSelectionScreen && Member(scene, "_openedTicks") is ulong opened
             && Time.GetTicksMsec() - opened <= 350)
-        { Status = "等待选牌界面入场完成。"; return new { selectionEntering = true }; }
+        { selectionWaiting = true; Status = "等待选牌界面入场完成。"; return new { selectionEntering = true }; }
         var selected = Items(Member(scene, "_selectedCards")).OfType<CardModel>().ToArray();
         var prefs = Member(scene, "_prefs");
         var previewNames = new[] { "_previewContainer", "_upgradeSinglePreviewContainer", "_upgradeMultiPreviewContainer", "_enchantSinglePreviewContainer", "_enchantMultiPreviewContainer", "_bundlePreviewContainer" };
@@ -271,7 +285,7 @@ public sealed partial class GameAdapter
             foreach (var bundle in Walk(scene).OfType<NCardBundle>().Where(LiveVisible).Where(b => Enabled(b.Hitbox)))
                 Add(bundle, "选择卡牌组合：" + string.Join("、", bundle.Bundle.Select(c => c.Title)), "select_bundle",
                     new { cards = bundle.Bundle.Select(SnapshotCard).ToArray() }, () => bundle.EmitSignal(NCardBundle.SignalName.Clicked, bundle));
-            foreach (var holder in holders.Where(h => Member(h, "_isClickable") is not false && h.Hitbox.IsEnabled))
+            foreach (var holder in holders.Where(h => scene is not NChooseABundleSelectionScreen && Member(h, "_isClickable") is not false && h.Hitbox.IsEnabled))
             {
                 var card = holder.CardModel!;
                 bool isSelected = selected.Contains(card);
@@ -348,6 +362,8 @@ public sealed partial class GameAdapter
         foreach (var button in Walk(scene).OfType<NClickableControl>().Where(Enabled))
         {
             if (IsBlocked(button.GetType().Name) || IsBlocked(button.Name.ToString())) continue;
+            string nodeSuffix = ":" + button.GetInstanceId();
+            if (dispatch.Keys.Any(id => id.EndsWith(nodeSuffix, StringComparison.Ordinal))) continue;
             var text = ButtonText(button, "");
             if (text.Length == 0 || text.Length > 1200 || IsBlocked(text)) continue;
             // Only the active gameplay subtree is traversed. Top-bar menus and the autopilot panel are outside this subtree.

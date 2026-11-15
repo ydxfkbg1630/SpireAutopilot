@@ -23,6 +23,22 @@ public sealed class CombatBridge
 
     public string Status { get; private set; } = "等待战斗";
 
+    /// <summary>Native cancellation clears pointers first; reference-release tasks drain afterward.</summary>
+    public bool IsQuiescent()
+    {
+        if (!BindController()) return true;
+        foreach (string name in new[] { "_search", "_deployment", "_deferredSearchCts" })
+            if (_controller!.GetField(name, StaticMembers)!.GetValue(null) != null) return false;
+        foreach (string name in new[] { "PendingSearchReferenceReleases", "PendingDeploymentReferenceReleases", "PendingDeferredSearchReleases" })
+            if (((IEnumerable<Task>)_controller!.GetField(name, StaticMembers)!.GetValue(null)!).Any(task => !task.IsCompleted)) return false;
+        var setup = _controller!.Assembly.GetType("CombatSolver.PlayerTurnSetupCoordinator")!;
+        object? plan = setup.GetField("_active", StaticMembers)!.GetValue(null);
+        if (plan == null) return true;
+        const BindingFlags members = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic;
+        return plan.GetType().GetField("SearchCancellation", members)!.GetValue(plan) == null
+            && plan.GetType().GetProperty("ReplayDrivingStarted", members)!.GetValue(plan) is not true;
+    }
+
     public bool PrepareOwnership()
     {
         if (!BindController()) return false;
@@ -148,6 +164,12 @@ public sealed class CombatBridge
         {
             // The solver completes its current atomic action according to its own lifecycle.
             Invoke(_setFullAuto!, new object?[] { host, state, false });
+            // FullAuto=false alone leaves DeployWhenReady and in-flight deployment alive.
+            // Use the solver's existing reference-release/cancellation paths as well.
+            _controller.Assembly.GetType("CombatSolver.PlayerTurnSetupCoordinator")!
+                .GetMethod("CancelForSolverDisabled", StaticMembers)!.Invoke(null, null);
+            foreach (string name in new[] { "CancelDeferredSearch", "CancelSearch", "CancelDeployment" })
+                _controller.GetMethod(name, StaticMembers)!.Invoke(null, null);
         }
         ResetCombat();
         Status = "自动驾驶已暂停";

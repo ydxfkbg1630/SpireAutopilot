@@ -220,8 +220,8 @@ public static class NativeProbe
                     }
                     providerApiCalls++;
                     WriteProgress();
-                    host.BeginProbeModel(frame.Scene, frame.Token);
-                    var requestFrame = decisionContext.Prepare(frame, route, actions.TakeLast(6).Select(a => JsonSerializer.Serialize(a)));
+                    host.BeginModelDecision(frame.Scene, frame.Token);
+                    var requestFrame = decisionContext.Prepare(frame, route);
                     ModelDecision decision;
                     bool returned = false;
                     try

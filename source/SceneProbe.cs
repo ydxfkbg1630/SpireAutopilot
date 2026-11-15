@@ -2,6 +2,8 @@ using System.Diagnostics;
 using System.Text.Json;
 using Godot;
 using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Commands;
+using MegaCrit.Sts2.Core.CardSelection;
 using MegaCrit.Sts2.Core.Entities.Cards;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent;
@@ -128,6 +130,45 @@ public static class SceneProbe
             Assert("card_reward_deck_effect", player.Deck.Cards.Count == deck + 1, new { before = deck, after = player.Deck.Cards.Count });
             await DriveUntil(f => f.Scene != "NRewardsScreen" && f.Scene != "NCardRewardSelectionScreen", "close_rewards", "confirm", "continue");
             await Complete(offering, "reward_offer_completed");
+
+            var startField = typeof(RunManager).GetField("_startTime", System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)!;
+            long nativeStart = (long)startField.GetValue(RunManager.Instance)!;
+            string originalRunIdentity = game.RunIdentity!;
+            try
+            {
+                startField.SetValue(RunManager.Instance, nativeStart + 1);
+                Assert("same_seed_distinct_native_start_identity", game.RunIdentity != originalRunIdentity,
+                    new { nativeStart, originalRunIdentity, newIdentity = game.RunIdentity, sameSeed = run.Rng.StringSeed });
+            }
+            finally { startField.SetValue(RunManager.Instance, nativeStart); }
+            Assert("restored_native_start_identity_stable", game.RunIdentity == originalRunIdentity, new { originalRunIdentity, restored = game.RunIdentity });
+
+            Task<IEnumerable<CardModel>> transforming = CardSelectCmd.FromDeckForTransformation(player,
+                new CardSelectorPrefs(CardSelectorPrefs.TransformSelectionPrompt, 1) { RequireManualConfirmation = true });
+            var transformFrame = await Frame(f => f.Actions.Any(a => a.Kind == "select_card"));
+            Assert("transform_choice_full_context", JsonSerializer.Serialize(transformFrame.State).Contains("deck")
+                && Details(transformFrame.Actions.First(a => a.Kind == "select_card")).GetProperty("card").GetProperty("description").GetString() is { Length: > 0 },
+                new { transformFrame.Scene, transformFrame.State });
+            await SelectAndConfirm("transformation_selection", () => transforming.IsCompleted);
+            await Complete(transforming, "transformation_choice_completed");
+
+            IReadOnlyList<IReadOnlyList<CardModel>> bundles = new IReadOnlyList<CardModel>[]
+            { player.Deck.Cards.Take(2).Select(run.CloneCard).ToArray(), player.Deck.Cards.Skip(2).Take(2).Select(run.CloneCard).ToArray() };
+            Task<IEnumerable<CardModel>> bundleTask = CardSelectCmd.FromChooseABundleScreen(player, bundles);
+            var bundleFrame = await Frame(f => f.Scene == "NChooseABundleSelectionScreen" && f.Actions.Any(a => a.Kind == "select_bundle"));
+            int legacyHolderCount = Walk(MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext.ActiveScreenContext.Instance.GetCurrentScreen() as Node ?? throw new InvalidOperationException("Bundle screen expected"))
+                .OfType<MegaCrit.Sts2.Core.Nodes.Cards.Holders.NCardHolder>().Count(h => h.CardModel != null && h.IsVisibleInTree() && h.Hitbox.IsEnabled && h.GetType().Name != "NPreviewCardHolder");
+            Assert("bundle_native_semantics_only", bundleFrame.Actions.Count(a => a.Kind == "select_bundle") == 2
+                && bundleFrame.Actions.All(a => a.Kind != "select_card"), new { legacyHolderCount, scope = "Native bundle selection and confirmation; individual card inspection is outside the legal action list", actions = bundleFrame.Actions });
+            await Execute(bundleFrame, bundleFrame.Actions.First(a => a.Kind == "select_bundle"));
+            var bundleConfirm = await Frame(f => f.Actions.Any(a => a.Kind == "confirm"));
+            await Execute(bundleConfirm, bundleConfirm.Actions.First(a => a.Kind == "confirm"));
+            await Complete(bundleTask, "native_bundle_complete");
+            game.AllowNativeUiFallback = true;
+            var afterSelection = game.Capture();
+            Assert("completed_selection_waits_even_with_fallback", afterSelection == null || afterSelection.Scene != "NChooseABundleSelectionScreen",
+                new { frame = afterSelection, game.Status });
+            game.AllowNativeUiFallback = false;
 
             await Enter(RoomType.Treasure, "treasure");
             int relics = player.Relics.Count, chestGold = player.Gold;

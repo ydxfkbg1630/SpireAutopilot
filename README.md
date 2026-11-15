@@ -1,89 +1,52 @@
+![尖塔全程领航](assets/banner.png)
+
 # 尖塔全程领航 · SpireAutopilot
 
-为《杀戮尖塔 2》单人跑局提供自动领航。兼容 OpenAI 协议的模型负责地图、事件、奖励、商店、休息和局外选牌；战斗优先使用 STS2 Solver，搜索达到 120 秒时由 CombatSolver 接替。通过游戏原生状态和动作接口完成决策，支持整幕路线规划、持续会话、整局游戏经验和精简直播窗口。
+让《杀戮尖塔 2》的单人爬塔自动进行。CombatSolver 负责战斗，模型负责地图路线、事件、奖励、商店、休息与选牌；每局结束后更新一份持续积累的经验总结。
 
-[Steam 创意工坊](https://steamcommunity.com/sharedfiles/filedetails/?id=3839527748) · [GitHub Releases](https://github.com/ydxfkbg1630/SpireAutopilot/releases) · [更新记录](CHANGELOG.md)
+[订阅创意工坊](https://steamcommunity.com/sharedfiles/filedetails/?id=3839527748) · [下载发布版](https://github.com/ydxfkbg1630/SpireAutopilot/releases) · [更新记录](CHANGELOG.md)
 
-## 安装
+## 开始使用
 
-目标版本：游戏 v0.113.0、Godot 4.5.1、.NET 9；主求解器 STS2 Solver、备用 CombatSolver 0.51.5、RitsuLib 0.6.11+。
+当前适配游戏 **v0.113.0**、**CombatSolver 0.51.5** 与 **RitsuLib 0.6.11+**，面向 Windows 单人游戏。
 
-1. 通过 Steam 创意工坊安装并启用 **STS2 Solver（尖塔求解器）**、**CombatSolver** 和 **RitsuLib**。
-2. 从本项目 GitHub Releases 下载模组安装包，将包内 `SpireAutopilot` 文件夹放入游戏的 `mods/` 目录。最终 `mods/SpireAutopilot/` 应包含 `SpireAutopilot.dll` 和 `SpireAutopilot.json`。
-3. 启动游戏并启用「尖塔全程领航」，进入或继续一局单人游戏。
-4. 按 **F8** 填写模型 Base URL、模型 ID 和 API Key，测试连接。
-5. 按 **F9** 开始或暂停；按 **F10** 显示或隐藏直播小窗。
+1. 订阅并启用 CombatSolver、RitsuLib 和本模组。手动安装时，将发布包中的 `SpireAutopilot` 文件夹放入游戏的 `mods/`。
+2. 按 **F8** 打开设置，在「模型」页填写接口地址、模型 ID 和 API Key，选择服务支持的协议。
+3. 点击「测试连接」，连接成功后点击「保存设置」。
+4. 开始或继续单人游戏。领航启动时默认开启，可随时按 **F9** 暂停或继续。
 
-在 **F8 → 直播** 勾选「启用自动战斗」。战斗控制固定为 **STS2 Solver 优先 → 搜索 120 秒超时转 CombatSolver**。主求解器负责搜索和执行；实际搜索达到 120 秒且仍在计算时，备用求解器接管本场后续战斗，下一场重新使用 STS2 Solver。领航协调两套求解器的控制权，当前执行方负责战斗出牌、用药和原生选牌。
+需要一个可用的 OpenAI 兼容模型服务；模型调用费用由所选服务商计收。支持 Responses 与 Chat Completions，地址可填写服务根地址或完整接口地址。
 
-愚者与观者组合可按需单独安装 **FoolSolverCompat**。该兼容模组单独发布，由其自己的许可证约束。
+## 领航与显示
 
-## 模型与会话
+| 按键 | 功能 |
+| --- | --- |
+| **F8** | 打开或收起设置 |
+| **F9** | 暂停或继续领航 |
+| **F10** | 显示或隐藏直播窗 |
 
-支持 Responses 与 Chat Completions。Base URL 可填写服务根地址或完整接口地址，模型 ID 使用服务商当前提供的名称。第三方兼容服务的协议能力以其实际接口为准。
+直播窗仅显示当前决策、搜索或出牌进度，拖动标题即可移动。领航期间统一使用本模组界面。
 
-持续会话保留固定前缀并追加局面差分，按轮数、输入字节和相对局面长度整理历史；明确的继续和领取金币等动作在本地执行。DeepSeek Responses 采用客户端历史回放，原生 OpenAI Responses 支持响应链。
+模型直接读取游戏状态并执行游戏动作，支持地图、事件、奖励、商店、休息、选牌和宝箱等场景。地图决策结合整层路线规划；卡牌选择结合牌组、角色状态、遗物和当前位置。战斗由 CombatSolver 独立负责。
 
-API Key 通过当前 Windows 用户的 DPAPI 加密保存在 `%APPDATA%/SlayTheSpire2/spire_autopilot.json`。仓库中的 `spire_autopilot.example.json` 用于说明设置。使用者在游戏面板填写自己的接口与密钥。
+## 经验与策略
 
-### 整局游戏经验
+在 F8 设置中填写策略偏好，指导局外决策。每局结算后，模型结合本局结果修订同一份 `experience.md`，供后续游戏参考。
 
-模型处理战斗外的战略决策，并在整局结算后根据路线、牌组构筑、资源选择与结果整理一份游戏经验。**F8 → 模型 → 游戏经验** 提供「整局结束后生成游戏经验」和「后续决策读取游戏经验」两个独立开关，默认开启。生成经验按实际模型调用产生用量；经验作为历史观测，结合当前局面使用。
+「模型」页提供「每局更新经验总结」「决策时参考经验」开关，以及「打开经验目录」按钮。经验更新也会产生模型调用。
 
-点击「游戏经验目录」可打开游戏用户数据目录下的 `spire_autopilot_run_experience/`。每整局对应一份经验文档，后续局外决策按开关读取。F8 的「非战斗思考模式」用于局外决策与游戏经验整理；直播窗只呈现当前内容。
+## 求解器设置
 
-## 窗口和运行范围
+F8 →「求解器」集中管理 CombatSolver 参数，可按名称或分类查找。搜索时间、节点数、束宽与线程预算可按设备和等待偏好调整。
 
-直播小窗只显示当前阶段及当前决策摘要；战斗期间显示求解器搜索时间、节点或出牌进度。F8 高级页提供详细用量与会话统计。领航接管期间统一使用精简窗口，暂停时恢复求解器界面。
+点击「应用设置」后，参数随下一次搜索生效；「重新读取」加载已保存值，「恢复默认」恢复求解器默认值。运行时 GC 设置随下次启动生效。
 
-0.4.5 恢复求解器原有的搜索质量与预算：时间、节点、束宽、分支范围及搜索组合均沿用求解器配置。保留 F9 提前接管、实际执行器诊断、工作线程设置，以及内存回收和动画线程隔离。工作线程数沿用求解器配置或用户手动上限；实际搜索进度以求解器状态为准。
+## 数据与支持
 
-### 在 F8 调整备用求解器
+API Key 使用当前 Windows 账户加密保存。配置和经验保存在游戏用户数据目录，个人接口信息由玩家在本地填写。
 
-**F8 → 备用求解器** 页集中提供 CombatSolver 的 **53 项参数**。主求解器 STS2 Solver 的搜索、药水等设置使用其自带面板。备用参数支持分类或搜索中文名称、原始字段名，可编辑搜索、执行、内存、药水收益、诊断和窗口参数。可空参数的「自定义」控制是否覆盖原生预设；选择性能预设时沿用求解器原生同步逻辑，手动调整搜索预算会切换为 Custom。
+遇到兼容或运行问题，可在 [GitHub Issues](https://github.com/ydxfkbg1630/SpireAutopilot/issues) 提交游戏与模组版本、复现步骤和脱敏错误摘要。
 
-改好后点击「应用求解器设置」，仅提交已修改字段，经原生校验保存，下一次搜索采用新设置；「重新读取」取回当前配置，「恢复求解器默认」应用原生默认值。成长预算、遗物计数规则和药水指令等复杂参数以 JSON 编辑，字段结构与枚举参照面板说明。运行时 GC 配置通常随下一次启动生效。
+开发、构建与测试见 [开发指南](docs/DEVELOPMENT.md)。参与贡献与安全反馈见 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [SECURITY.md](SECURITY.md)。
 
-备用求解器保留原 300 秒、500,000 节点、束宽 135 和搜索组合配置。后续预算由玩家在面板内选择；此前试验原型已归档，发布内容以本版源码与参数面板为准。
-
-0.4.3 的内存管理使用常规 GC，分配检查周期上限为 4 GiB；由求解器原生调度器结合可复用堆和当前余量安排任务，在原生回收边界释放缓存并继续搜索。工作线程数沿用求解器设置或用户手动上限。周期是分配检查预算，实际进程内存包含游戏资源和各模组对象。默认保留至少 2 GiB 或物理内存 10% 的系统余量，以及 1 GiB 提交余量。
-
-同时兼容奶蛙愚者皮肤：预测计算期间隔离其 Spine 动画查询，实际出牌仍播放皮肤动画。
-
-支持地图、奖励、事件、商店、休息、选牌、宝箱、水晶球和教学提示。目标范围为已经开始的单人跑局，结算后按设置生成游戏经验并停止领航。扩展模组的特殊内容依其提供的原生动作和当前求解器的兼容范围运行。决策质量和通关结果随模型、牌组、求解预算及游戏局面变化。
-
-## 从源码构建
-
-安装 .NET 9 SDK 与合法拥有的游戏；NuGet 将还原 Godot.NET.Sdk/4.5.1。源码通过本地游戏目录引用 `sts2.dll`、`0Harmony.dll` 和 `GodotSharp.dll`。
-
-在 PowerShell 中，从仓库根目录执行：
-
-```powershell
-$env:STS2_GAME_DATA = 'D:/SteamLibrary/steamapps/common/Slay the Spire 2/data_sts2_windows_x86_64'
-dotnet build source/SpireAutopilot.csproj -c Release -m:1
-```
-
-也可显式传入 `-p:GameData="游戏目录/data_sts2_windows_x86_64"`。编译结果位于 `source/.godot/mono/temp/bin/Release/SpireAutopilot.dll`，与根目录的 `SpireAutopilot.json` 一同安装。
-
-离线逻辑测试需要 .NET 10 SDK，运行时使用本地模拟 HTTP 服务：
-
-```powershell
-dotnet run --project source/tests/ProviderTests.csproj
-dotnet run --project source/tests/PlanningTests.csproj
-dotnet run --project source/tests/SessionEfficiencyTests.csproj
-dotnet run --project source/tests/MemoryTests.csproj
-```
-
-动画线程隔离测试使用游戏对应的 .NET 9 运行时与 Harmony：`dotnet run --project source/tests/VisualIsolationTests.csproj`（同样设置 `STS2_GAME_DATA`）。
-
-`*Probe` 项目用于显式联调。涉及真实服务的探针由调用者提供本地配置与输入，会产生对应 API 用量。
-
-## 贡献和许可证
-
-请参阅 [CONTRIBUTING.md](CONTRIBUTING.md) 和 [SECURITY.md](SECURITY.md)。SpireAutopilot 的原创代码按 **Apache License 2.0** 发布，详见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。
-
-STS2 Solver、CombatSolver、RitsuLib、FoolSolverCompat、Godot、Harmony 以及游戏本体分别遵循各自的许可证或使用条款。本项目引用游戏的本地程序集，并通过运行时反射衔接两套求解器。游戏资源与这些第三方依赖由各自官方渠道提供。
-
-### 说书人兼容补丁
-
-STS2 Solver 0.2.3 对原生遗物说书人的注册缺口会导致 unsupported-relic STORYTELLER。Release 附带 Sts2Solver-Storyteller-fix.zip，包含本地兼容 DLL、许可证、原作者说明及源码差异。它补齐真实遗物语义并保留原有内容校验。安装到 mods/Sts2Solver，或待原作者版本包含该修复后使用原版。
+原创代码采用 [Apache-2.0](LICENSE) 许可。游戏、CombatSolver、RitsuLib、FoolSolverCompat、Godot 与 Harmony 遵循各自许可，署名见 [NOTICE](NOTICE)。

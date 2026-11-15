@@ -2,18 +2,13 @@
   "id": "SpireAutopilot",
   "name": "尖塔全程领航",
   "author": "ydxfkbg1630",
-  "description": "STS2 Solver优先，120秒后由CombatSolver接管；模型仅负责局外决策与整局经验。",
-  "version": "0.5.3",
+  "description": "自动战斗与局外模型决策，每局更新统一经验总结。",
+  "version": "0.5.6",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": true,
   "min_game_version": "0.113.0",
   "dependencies": [
-    {
-      "workshop_id": "3834819227",
-      "min_version": "0.2.3",
-      "id": "Sts2Solver"
-    },
     {
       "workshop_id": "3790899961",
       "min_version": "0.51.5",

@@ -17,6 +17,7 @@ public sealed class RoutePlanner
     private RouteStep? current;
     private int hp;
     private int maxHp;
+    private bool restoredFileBackedUp;
     private readonly Dictionary<string, RouteStep[]> options = new(StringComparer.Ordinal);
     public bool PlanningRequired { get; private set; }
     public string PlanningTrigger { get; private set; } = "首次读取整幕地图";
@@ -24,20 +25,28 @@ public sealed class RoutePlanner
     public object? MapContext => map;
     public IReadOnlyList<RouteStep> Remaining { get; private set; } = Array.Empty<RouteStep>();
     public object[] RouteOptions { get; private set; } = Array.Empty<object>();
+    public string? RestoreDiagnostic { get; private set; }
 
     public RoutePlanner(string? savePath = null)
     {
         this.savePath = savePath;
         if (savePath == null || !File.Exists(savePath)) return;
-        try { saved = JsonSerializer.Deserialize<SavedRoute>(File.ReadAllText(savePath)); }
-        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { }
+        try
+        {
+            saved = JsonSerializer.Deserialize<SavedRoute>(File.ReadAllText(savePath));
+            if (saved?.Route is not { Length: > 0 and <= 100 } || string.IsNullOrWhiteSpace(saved.Key)
+                || string.IsNullOrWhiteSpace(saved.MapHash) || saved.Route.Any(p => p == null))
+            { saved = null; RestoreDiagnostic = "保存的路线字段需要重新生成，原文件已保留：" + savePath; }
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
+        { RestoreDiagnostic = "路线恢复反馈：" + ex.GetType().Name + "；原文件已保留：" + savePath; }
     }
 
     public void Observe(DecisionFrame frame, string strategy)
     {
         JsonObject state = JsonSerializer.SerializeToNode(frame.State)!.AsObject();
         string nextKey = (state["runKey"]?.ToString() ?? "legacy") + ":" + state["CurrentActIndex"] + ":" + Hash(strategy);
-        if (key != nextKey) { key = nextKey; map = null; mapHash = ""; nodes.Clear(); Remaining = Array.Empty<RouteStep>(); Summary = "进入地图后规划本幕完整路线。"; }
+        if (key != nextKey) { key = nextKey; map = null; mapHash = ""; nodes.Clear(); options.Clear(); RouteOptions = Array.Empty<object>(); Remaining = Array.Empty<RouteStep>(); Summary = "进入地图后规划本幕完整路线。"; }
         hp = state["player"]?["hp"]?.GetValue<int>() ?? 0;
         maxHp = state["player"]?["maxHp"]?.GetValue<int>() ?? 1;
         current = ReadStep(state["currentMapPoint"]);
@@ -92,6 +101,13 @@ public sealed class RoutePlanner
             Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(savePath))!);
             string temporary = savePath + ".tmp";
             File.WriteAllText(temporary, JsonSerializer.Serialize(saved));
+            if (RestoreDiagnostic != null && !restoredFileBackedUp && File.Exists(savePath))
+            {
+                string backup = savePath + ".invalid-" + DateTime.UtcNow.ToString("yyyyMMddHHmmssfff") + ".bak";
+                File.Copy(savePath, backup, overwrite: false);
+                restoredFileBackedUp = true;
+                RestoreDiagnostic += "；恢复前副本：" + backup;
+            }
             File.Move(temporary, savePath, true);
         }
     }

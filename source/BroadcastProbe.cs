@@ -27,7 +27,6 @@ public static class BroadcastProbe
                 var monitor = Walk(panel).OfType<AutopilotMonitor>().Single();
                 var prefix = resolution.Y + "p_";
                 Current(panel, "model", "地图决策", "model-A");
-                panel.SetPlan("OLD_ROUTE_SENTINEL"); Details(panel, "OLD_REASON_SENTINEL"); Metrics(panel, "OLD_METRIC_SENTINEL");
                 await Settle();
                 Assert(prefix + "model_A_present", VisibleText(monitor).Contains("OLD_REASON_SENTINEL"), new { owner = "model-A" });
                 Current(panel, "model", "奖励决策", "model-B");

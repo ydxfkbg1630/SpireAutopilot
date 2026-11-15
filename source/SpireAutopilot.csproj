@@ -7,11 +7,14 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <GameData Condition="'$(GameData)' == ''">$(STS2_GAME_DATA)</GameData>
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
-    <Version>0.5.3</Version>
+    <Version>0.5.6</Version>
+    <EnableDiagnostics Condition="'$(EnableDiagnostics)' == ''">false</EnableDiagnostics>
+    <DefineConstants Condition="'$(EnableDiagnostics)' == 'true'">$(DefineConstants);SPIRE_AUTOPILOT_DIAGNOSTICS</DefineConstants>
   </PropertyGroup>
   <Target Name="CheckGameData" BeforeTargets="ResolveAssemblyReferences"><Error Condition="!Exists('$(GameData)/sts2.dll')" Text="Set GameData or STS2_GAME_DATA to the installed game data_sts2_windows_x86_64 directory." /></Target>
   <ItemGroup>
     <Compile Remove="tests/**/*.cs" />
+    <Compile Remove="*Probe.cs;CompatibilityFactEvidence.cs" Condition="'$(EnableDiagnostics)' != 'true'" />
     <Reference Include="sts2" HintPath="$(GameData)/sts2.dll" Private="false" />
     <Reference Include="0Harmony" HintPath="$(GameData)/0Harmony.dll" Private="false" />
     <Reference Include="GodotSharp" HintPath="$(GameData)/GodotSharp.dll" Private="false" />

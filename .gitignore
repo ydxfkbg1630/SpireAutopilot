@@ -19,3 +19,9 @@ verification/
 private/
 
 spire_autopilot_experience/
+
+spire_autopilot_run_experience/
+spire_autopilot_run_experience.legacy/
+*.tmp
+
+artifacts/

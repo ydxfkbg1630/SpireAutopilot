@@ -12,7 +12,6 @@ public partial class AutopilotHost : Node
     private string? observedRun;
     private int reflectionFailures;
     private readonly CombatBridge combat = new();
-    private readonly Sts2SolverBridge primarySolver = new();
     private readonly GameAdapter game = new();
     private readonly DecisionContext decisionContext = new();
     private RoutePlanner route = null!;
@@ -34,9 +33,6 @@ public partial class AutopilotHost : Node
     private double nextCombatControl;
     private double modelStartedAt;
     private bool modelThinking;
-    private bool fallbackCombat;
-    private bool fallbackStarting;
-    private Task<bool>? fallbackCancellation;
     private string? solverBattle;
     private bool isolatedProbe;
     private string presentationOwner = "";
@@ -45,34 +41,60 @@ public partial class AutopilotHost : Node
     private double lastActionTime;
     private string? retryToken;
     private int retryCount;
-    private readonly Queue<string> history = new();
     private string ConfigPath => Path.Combine(OS.GetUserDataDir(), "spire_autopilot.json");
     public override void _Ready()
     {
         try { config = AutopilotConfig.Load(ConfigPath); }
         catch (Exception ex) { config = new(); GD.PrintErr($"[SpireAutopilot] Config: {ex.GetType().Name}"); }
         route = new RoutePlanner(Path.Combine(OS.GetUserDataDir(), "spire_autopilot_route.json"));
+        if (route.RestoreDiagnostic is { } routeDiagnostic) GD.Print("[SpireAutopilot] " + routeDiagnostic);
         runExperience = new RunExperienceStore(Path.Combine(OS.GetUserDataDir(), "spire_autopilot_run_experience"));
+        if (runExperience.RestoreDiagnostic is { } experienceDiagnostic) GD.Print("[SpireAutopilot] " + experienceDiagnostic);
         panel = new AutopilotPanel();
         AddChild(panel);
         panel.Initialize(config, SaveConfig, Toggle, TestConnection);
+        isolatedProbe = false;
+#if SPIRE_AUTOPILOT_DIAGNOSTICS
         isolatedProbe = !string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_PROBE"));
+#endif
         panel.SetStatus("准备就绪：填写接口，F9 开始领航。", false);
-        if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_STORYTELLER_PROBE")))
-            _ = StorytellerSolverProbe.RunAsync(this);
-        else if (System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_SETTINGS_PROBE") is { Length: > 0 } settingsProbe)
+        if (config.AutoCombat)
+            CallDeferred(nameof(EnableDefault));
+#if SPIRE_AUTOPILOT_DIAGNOSTICS
+        if (System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_SETTINGS_PROBE") is { Length: > 0 } settingsProbe)
             _ = SolverSettingsProbe.RunAsync(this, settingsProbe);
         else if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_SCENE_PROBE")))
             _ = SceneProbe.RunAsync(this);
         else if (!string.IsNullOrWhiteSpace(System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_PROBE")))
             _ = NativeProbe.RunAsync(this);
+#endif
+    }
+    private void EnableDefault()
+    {
+        if (enabled || exiting) return;
+        enabled = true;
+        generation++;
+        reflectionFailures = 0;
+        SolverPresentation.ActivateForExternalSolver();
+        SolverPresentation.WorkerLimit = config.SolverWorkerLimit;
+        SolverPresentation.MaxSpeed = config.SolverMaxSpeed;
+        SolverPresentation.LightweightDiagnostics = config.LightweightSolverDiagnostics;
+        panel.ShowMonitor();
+        lastActionToken = null;
+        retryToken = null;
+        retryCount = 0;
+        SetStatus("默认领航已启动；F9 可暂停或继续。");
+        BeginCurrent("领航", "默认接管已启用", "default-start:" + generation);
+        GD.Print("[SpireAutopilot] DEFAULT_ENABLED auto_combat=" + config.AutoCombat);
+        UpdateCombatControl();
     }
     public override void _Input(InputEvent @event)
     {
         if (@event is not InputEventKey { Pressed: true, Echo: false } key) return;
-        if (key.Keycode == Key.F8) { panel.ToggleVisible(); GetViewport().SetInputAsHandled(); }
-        if (key.Keycode == Key.F9) { Toggle(); GetViewport().SetInputAsHandled(); }
-        if (key.Keycode == Key.F10) { panel.ToggleMonitor(); GetViewport().SetInputAsHandled(); }
+        Key hotkey = key.Keycode != Key.None ? key.Keycode : key.PhysicalKeycode;
+        if (hotkey == Key.F8) { panel.ToggleVisible(); GD.Print("[SpireAutopilot] HOTKEY F8"); GetViewport().SetInputAsHandled(); }
+        if (hotkey == Key.F9) { GD.Print("[SpireAutopilot] HOTKEY F9"); Toggle(); GetViewport().SetInputAsHandled(); }
+        if (hotkey == Key.F10) { panel.ToggleMonitor(); GD.Print("[SpireAutopilot] HOTKEY F10"); GetViewport().SetInputAsHandled(); }
     }
     public override void _Process(double delta)
     {
@@ -98,9 +120,6 @@ public partial class AutopilotHost : Node
         provider.ResetSession();
         reflectionProvider.ResetSession();
         decisionContext.Reset();
-        fallbackCombat = false;
-        fallbackStarting = false;
-        fallbackCancellation = null;
         config = value;
         config.Save(ConfigPath);
     }
@@ -112,16 +131,14 @@ public partial class AutopilotHost : Node
         if (string.IsNullOrWhiteSpace(config.BaseUrl) || string.IsNullOrWhiteSpace(config.Model))
         { SetStatus("请填写接口 URL 和模型名。"); panel.ShowPanel(); return; }
         enabled = true;
+        generation++;
         reflectionFailures = 0;
         SolverPresentation.ActivateForExternalSolver();
-        primarySolver.HideOverlayOnly();
-        UpdateCombatControl();
         SolverPresentation.WorkerLimit = config.SolverWorkerLimit;
         SolverPresentation.MaxSpeed = config.SolverMaxSpeed;
         SolverPresentation.LightweightDiagnostics = config.LightweightSolverDiagnostics;
-        if (config.AutoCombat) { CombatSolverSuppression.Activate(); SolverPresentation.ActivateForExternalSolver(); primarySolver.PrepareOwnership(); }
+        if (config.AutoCombat) UpdateCombatControl();
         panel.ShowMonitor();
-        generation++;
         lastActionToken = null;
         retryToken = null;
         retryCount = 0;
@@ -133,8 +150,7 @@ public partial class AutopilotHost : Node
         enabled = false;
         generation++;
         pending?.Cancel();
-        primarySolver.Pause();
-        CombatSolverSuppression.Release();
+        solverBattle = null;
         SolverPresentation.Restore();
         combat.PauseOwnedAutomation();
         modelThinking = false;
@@ -153,18 +169,16 @@ public partial class AutopilotHost : Node
         presentationKey = key;
         panel.BeginCurrent(owner, phase, key);
     }
-    private double SolverWaitSeconds => 120;
-
     private void UpdateCombatControl()
     {
-        // Presentation stays owned for the entire F9 session, including handoffs and room transitions.
+        if (!enabled || exiting) return;
         SolverPresentation.ActivateForExternalSolver();
-        primarySolver.HideOverlayOnly();
         if (!config.AutoCombat || !game.InCombat)
         {
-            if (solverBattle != null) CombatSolverSuppression.Activate();
+            if (solverBattle != null) combat.PauseOwnedAutomation();
             solverBattle = null;
-            fallbackCombat = false;
+            // PauseOwnedAutomation restores overlays; keep F9 presentation ownership.
+            SolverPresentation.ActivateForExternalSolver();
             return;
         }
         var battle = MegaCrit.Sts2.Core.Combat.CombatManager.Instance.DebugOnlyGetState();
@@ -172,50 +186,19 @@ public partial class AutopilotHost : Node
         if (solverBattle != identity)
         {
             solverBattle = identity;
-            fallbackCombat = false;
+            GD.Print("[SpireAutopilot] COMBAT_OWNER solver=CombatSolver mode=single");
         }
-        if (fallbackStarting) return;
-        if (fallbackCombat)
-        {
-            CombatSolverSuppression.Release();
-            combat.TryEnsureAutomaticCombat(true);
-            return;
-        }
-        if (fallbackCancellation is { IsCompleted: false }) return;
-        CombatSolverSuppression.Activate();
-        primarySolver.PrepareOwnership();
-        var status = primarySolver.Capture();
-        if (status.IsSearching && status.ElapsedSeconds >= SolverWaitSeconds
-            && !status.ComputationCompleted && !status.IsDeploying)
-        {
-            fallbackStarting = true;
-            fallbackCancellation = primarySolver.CancelAndDisableAutomation("primary_timeout");
-            _ = CompleteFallbackHandoffAsync(fallbackCancellation, generation, solverBattle);
-            return;
-        }
-        primarySolver.EnsureAutomaticCombat();
-    }
-    private async Task CompleteFallbackHandoffAsync(Task<bool> cancellation, long ownerGeneration, string? battleId)
-    {
-        bool canceled = await cancellation.ConfigureAwait(true);
-        if (!ReferenceEquals(fallbackCancellation, cancellation)) return;
-        if (!canceled || exiting || !enabled || !game.InCombat || generation != ownerGeneration || solverBattle != battleId)
-        { fallbackStarting = false; return; }
-        if (!primarySolver.Capture().IsQuiescent) { fallbackStarting = false; return; }
-        CombatSolverSuppression.Release();
         combat.PrepareOwnership();
-        fallbackCombat = true;
-        fallbackStarting = false;
-        BeginCurrent("备用求解器", "STS2 Solver 超时，CombatSolver 接管", "fallback:" + game.RunIdentity);
-        Record("STS2 Solver 达到 120 秒，已等待原生任务排空并切换 CombatSolver。");
+        combat.TryEnsureAutomaticCombat(true);
     }
+
     private void UpdatePresentation()
     {
         if (game.InCombat)
         {
             modelThinking = false;
             presentationOwner = "战斗";
-            var progress = fallbackCombat ? combat.GetProgress() : primarySolver.Capture().Progress;
+            var progress = combat.GetProgress();
             panel.SetSolverProgress(progress);
             return;
         }
@@ -227,7 +210,7 @@ public partial class AutopilotHost : Node
     {
         "NMapScreen" => "规划本幕路线",
         "Combat" => "评估本次出牌",
-        "RunReflection" => "整理整局游戏经验",
+        "RunReflection" => "更新经验总结",
         "NEventRoom" => "评估事件选项",
         "NRewardsScreen" => "选择战斗奖励",
         "NCardRewardSelectionScreen" => "选择新卡牌",
@@ -241,10 +224,6 @@ public partial class AutopilotHost : Node
     private void Record(string text)
     {
         text = Redact(text);
-        string line = DateTime.Now.ToString("HH:mm:ss") + "  " + text;
-        history.Enqueue(line);
-        while (history.Count > 30) history.Dequeue();
-        if (!exiting && GodotObject.IsInstanceValid(panel)) panel.SetHistory(string.Join('\n', history));
         // Only scene/action labels are logged. Provider request headers and credentials stay private.
         GD.Print("[SpireAutopilot] " + text);
     }
@@ -295,18 +274,23 @@ public partial class AutopilotHost : Node
             {
                 if (observedRun != activeRun)
                 {
-                    observedRun = activeRun;
                     runExperience.BeginRun(activeRun, game.CaptureRunObservation() ?? new { runKey = activeRun });
+                    observedRun = activeRun;
                     reflectionFailures = 0;
                 }
-                runExperience.Observe(game.CaptureRunObservation() ?? new { runKey = activeRun });
+                // Combat telemetry uses native scalar state, avoiding repeated deck upgrade
+                // preview cloning during search or deployment.
+                runExperience.Observe((game.InCombat ? game.CaptureCombatRunObservation() : game.CaptureRunObservation())
+                    ?? new { runKey = activeRun });
             }
             if (game.RunFinished && config.ReflectAfterRun)
                 runExperience.CreateReflectionFrame(new { finished = true, finalState = game.CaptureRunObservation() });
-            if (game.RunFinished && config.ReflectAfterRun && runExperience.HasPendingReflection && reflectionFailures < 2)
+            if (config.ReflectAfterRun && runExperience.HasPendingReflection && !game.InCombat
+                && (!game.RunActive || game.RunFinished) && reflectionFailures < 2)
             {
-                var reflectionFrame = runExperience.CreateReflectionFrame(new { finished = true, finalState = game.CaptureRunObservation() })!;
-                BeginProbeModel("RunReflection", reflectionFrame.Token);
+                var reflectionFrame = runExperience.CreateReflectionFrame(null);
+                if (reflectionFrame == null) return;
+                BeginModelDecision("RunReflection", reflectionFrame.Token);
                 bool reflectionReturned = false;
                 bool reflectionAccepted = false;
                 try
@@ -320,13 +304,13 @@ public partial class AutopilotHost : Node
                         reflectionAccepted = true;
                         reflectionFailures = 0;
                         RecordUsage(reflected.Usage);
-                        panel.SetCurrentDetails("整局游戏经验已保存。");
-                        Record("整局游戏经验已写入本地。");
+                        panel.SetCurrentDetails("经验总结已更新。");
+                        Record("经验总结已更新。");
                     }
-                    else { reflectionFailures++; Record("整局经验内容待重新获取。"); }
+                    else { reflectionFailures++; Record("重新获取经验总结。"); }
                 }
                 catch (Exception ex) when (ex is ModelProtocolException or ProviderTransientException or TimeoutException)
-                { reflectionFailures++; Record("整局经验请求：" + ex.GetType().Name + "；" + ex.Message); }
+                { reflectionFailures++; Record("经验更新：" + ex.GetType().Name + "；" + ex.Message); }
                 finally { if (reflectionReturned && !reflectionAccepted) reflectionProvider.DiscardLastDecision(); }
                 return;
             }
@@ -338,8 +322,7 @@ public partial class AutopilotHost : Node
                 SolverPresentation.MaxSpeed = config.SolverMaxSpeed;
                 SolverPresentation.LightweightDiagnostics = config.LightweightSolverDiagnostics;
                 SetStatus(!config.AutoCombat ? "战斗阶段：等待手动操作。"
-                    : fallbackStarting ? "等待主求解器原生任务交接。"
-                    : fallbackCombat ? combat.Status : primarySolver.Status);
+                    : combat.Status);
                 return;
             }
             game.AllowNativeUiFallback = config.AllowNativeUiFallback;
@@ -357,13 +340,12 @@ public partial class AutopilotHost : Node
                 return;
             }
             route.Observe(frame, config.Strategy);
-            panel.SetPlan(Redact(route.Summary));
             if (route.PlannedTravel(frame) is { } planned)
             {
                 savedModelCalls++;
                 Record($"沿本幕规划前进 → {planned.Label}");
                 BeginCurrent("地图", "沿路线前进", frame.Token);
-                panel.SetDecision("执行已规划的地图路线：" + planned.Label);
+                panel.SetDecision("沿路线前进：" + planned.Label);
                 await game.ExecuteAsync(frame.Token, planned.Id);
                 lastActionToken = frame.Token;
                 lastActionTime = clock;
@@ -376,7 +358,7 @@ public partial class AutopilotHost : Node
                 savedModelCalls++;
                 Record("本地执行：" + mechanical.Label + "（已省一次模型请求）");
                 BeginCurrent("执行", "完成当前操作", frame.Token);
-                panel.SetDecision("本次为明确的原生进度操作，直接执行：" + mechanical.Label);
+                panel.SetDecision("执行：" + mechanical.Label);
                 await game.ExecuteAsync(frame.Token, mechanical.Id);
                 lastActionToken = frame.Token;
                 lastActionTime = clock;
@@ -385,9 +367,9 @@ public partial class AutopilotHost : Node
                 return;
             }
             SetStatus($"{frame.Scene}：模型决策中（{frame.Actions.Count} 个合法动作）…");
-            BeginProbeModel(frame.Scene, frame.Token);
-            decisionContext.BattleLessons = config.UseRunExperience ? runExperience.ReadLessons() : "";
-            var requestFrame = decisionContext.Prepare(frame, route, history.TakeLast(6));
+            BeginModelDecision(frame.Scene, frame.Token);
+            decisionContext.RunLessons = config.UseRunExperience ? runExperience.ReadLessons() : "";
+            var requestFrame = decisionContext.Prepare(frame, route);
             awaitingModel = true;
             ModelDecision decision = await provider.DecideAsync(config, requestFrame, cts.Token);
             modelDecisionReturned = true;
@@ -397,23 +379,7 @@ public partial class AutopilotHost : Node
             DecisionFrame? fresh = game.Capture();
             if (fresh?.Token != frame.Token)
             { provider.DiscardLastDecision(); Record("场景已更新，重新读取局面。"); nextPoll = clock + .5; return; }
-            if (frame.Scene == "NMapScreen" && route.PlanningRequired && decision.RoutePlan == null && decision.RouteOptionId == null)
-            {
-                var options = route.RouteOptions.Select(item => JsonSerializer.SerializeToNode(item)).OfType<JsonObject>().ToArray();
-                var matching = options.FirstOrDefault(o => o["firstActionId"]?.ToString() == decision.ActionId) ?? options.FirstOrDefault();
-                if (matching?["id"]?.ToString() is { Length: > 0 } optionId)
-                {
-                    decision = decision with
-                    {
-                        ActionId = matching["firstActionId"]?.ToString() ?? decision.ActionId,
-                        RouteOptionId = optionId,
-                        PlanReason = "模型未返回完整路线，沿当前原生连通候选继续规划。"
-                    };
-                    Record("模型未返回完整地图路线，已使用当前原生连通路线候选继续。");
-                }
-            }
             route.Accept(frame, decision);
-            panel.SetPlan(Redact(route.Summary));
             modelThinking = false;
             panel.SetCurrentDetails(Redact(decision.ReasoningSummary is { Length: > 0 } summary ? summary : decision.Reason));
             SetCurrentUsage(decision.Usage);
@@ -462,11 +428,11 @@ public partial class AutopilotHost : Node
         }
         string last = usage is { PromptTokens: > 0, CachedTokens: >= 0 }
             ? $"本次缓存：{usage.CachedTokens}/{usage.PromptTokens} tokens（{100d * usage.CachedTokens / usage.PromptTokens:F1}%）"
-            : "本次缓存：服务端待提供命中token统计";
-        string aggregate = countedPromptTokens > 0 ? $"累计：{100d * countedCachedTokens / countedPromptTokens:F1}%（{countedRequests}/{totalRequests}次含统计）" : "累计缓存：等待服务端统计";
+            : "本次缓存：待统计";
+        string aggregate = countedPromptTokens > 0 ? $"累计：{100d * countedCachedTokens / countedPromptTokens:F1}%（{countedRequests}/{totalRequests}次含统计）" : "累计缓存：待统计";
         string misses = usage is { PromptTokens: not null, CachedTokens: not null } ? $"\n本次新增未缓存：{usage.PromptTokens.Value - usage.CachedTokens.Value} tokens" : "";
         string session = usage?.Session is { } info ? $"\n会话：{SessionMode(info.Mode)}，第{info.TurnCount}轮，输入{info.InputBytes / 1024d:F1}KiB" + (info.RebaseReason == "bounded_history_rebase" ? "；已按预算整理" : "") : "";
-        panel.SetUsage(last + "\n" + aggregate + misses + (usage == null ? "" : $"\n请求：{usage.ElapsedMilliseconds / 1000d:F2}秒；输出：{usage.CompletionTokens?.ToString() ?? "待统计"} tokens") + session + $"\n本地进度/路线已省：{savedModelCalls}次模型请求");
+        panel.SetUsage(last + "\n" + aggregate + misses + (usage == null ? "" : $"\n请求：{usage.ElapsedMilliseconds / 1000d:F2}秒；输出：{usage.CompletionTokens?.ToString() ?? "待统计"} tokens") + session + $"\n本地执行：{savedModelCalls}次模型请求");
         if (showCurrent) SetCurrentUsage(usage);
     }
     private void SetCurrentUsage(ProviderUsage? usage)
@@ -484,36 +450,35 @@ public partial class AutopilotHost : Node
         "chat_replay" => "Chat兼容持续会话",
         _ => "独立局面"
     };
+#if SPIRE_AUTOPILOT_DIAGNOSTICS
     internal void PresentProbeDecision(string scene, string plan, ModelDecision? decision)
     {
         panel.ShowMonitor();
         if (decision == null) BeginCurrent("执行", "完成当前操作", "probe-local:" + scene);
         else if (presentationOwner != "模型") BeginCurrent("模型", SceneTitle(scene), "probe-result:" + scene);
-        panel.SetPlan(Redact(plan));
         if (decision == null) { panel.SetCurrentDetails(Redact(scene)); return; }
         modelThinking = false;
         panel.SetCurrentDetails(Redact(decision.ReasoningSummary is { Length: > 0 } summary ? summary : decision.Reason));
         RecordUsage(decision.Usage);
     }
-    internal void BeginProbeModel(string scene, string token)
+#endif
+    internal void BeginModelDecision(string scene, string token)
     {
         panel.ShowMonitor();
         BeginCurrent("模型", SceneTitle(scene), token);
         modelThinking = true;
         modelStartedAt = clock;
-        panel.SetCurrentDetails("正在结合当前牌组、生命与选项做出选择…");
+        panel.SetCurrentDetails("正在决策…");
     }
     public override void _ExitTree()
     {
         exiting = true;
         generation++;
         pending?.Cancel();
-        if (GodotObject.IsInstanceValid(MegaCrit.Sts2.Core.Nodes.NGame.Instance)) combat.PauseOwnedAutomation();
+        if (GodotObject.IsInstanceValid(MegaCrit.Sts2.Core.Nodes.NGame.Instance))
+        { combat.PauseOwnedAutomation(); }
         provider.Dispose();
         reflectionProvider.Dispose();
-        primarySolver.Release();
-        CombatSolverSuppression.Release();
-        combat.PauseOwnedAutomation();
     }
 
     private static object ExperienceObservation(object snapshot)

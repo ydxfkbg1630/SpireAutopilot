@@ -11,6 +11,29 @@ namespace SpireAutopilot;
 
 public sealed partial class GameAdapter
 {
+    /// <summary>Small native combat telemetry; contains no deck/card upgrade-preview clones.</summary>
+    public object? CaptureCombatRunObservation()
+    {
+        var run = MegaCrit.Sts2.Core.Runs.RunManager.Instance.DebugOnlyGetState();
+        var combat = MegaCrit.Sts2.Core.Combat.CombatManager.Instance.DebugOnlyGetState();
+        var player = combat == null ? null : MegaCrit.Sts2.Core.Context.LocalContext.GetMe(combat);
+        if (run == null || combat == null || player?.PlayerCombatState is not { } state) return null;
+        return new
+        {
+            runKey = RunIdentity, run.CurrentActIndex, run.ActFloor, run.TotalFloor,
+            currentMapPoint = run.CurrentMapCoord is { } point ? new { row = point.row, column = point.col } : null,
+            room = run.CurrentRoom?.GetType().Name, side = combat.CurrentSide.ToString(), turn = state.TurnNumber,
+            phase = state.Phase.ToString(), energy = state.Energy, stars = state.Stars,
+            player = new { character = player.Character.Id.ToString(), hp = player.Creature.CurrentHp, maxHp = player.Creature.MaxHp,
+                block = Member(player.Creature, "Block"), player.Gold, powers = Items(Member(player.Creature, "Powers")).Select(SnapshotModel).ToArray() },
+            enemies = combat.Enemies.Select(enemy => new { id = enemy.CombatId, name = enemy.Name, hp = enemy.CurrentHp,
+                maxHp = enemy.MaxHp, block = Member(enemy, "Block"), enemy.IsAlive,
+                powers = Items(Member(enemy, "Powers")).Select(SnapshotModel).ToArray(),
+                intents = enemy.Monster?.NextMove.Intents.Select(intent => new { type = intent.IntentType.ToString(),
+                    damagePerHit = intent is MegaCrit.Sts2.Core.MonsterMoves.Intents.AttackIntent attack ? (int?)attack.GetSingleDamage(new[] { player.Creature }, enemy) : null,
+                    totalDamage = intent is MegaCrit.Sts2.Core.MonsterMoves.Intents.AttackIntent total ? (int?)total.GetTotalDamage(new[] { player.Creature }, enemy) : null }).ToArray() }).ToArray()
+        };
+    }
     private static bool LiveVisible(Node n) => GodotObject.IsInstanceValid(n) && n.IsInsideTree() && !n.IsQueuedForDeletion() && (n is not CanvasItem c || c.IsVisibleInTree());
     private static bool Enabled(NClickableControl n) => LiveVisible(n) && n.IsEnabled;
 

@@ -345,16 +345,14 @@ await Test("configuration roundtrip with Windows user credential", () =>
     var path = Path.Combine(dir, "config.json");
     try
     {
-        var config = Config(); config.Strategy = "保持生命"; config.DecisionDelaySeconds = 1.5; config.PrimarySolverTimeoutSeconds = 120;
+        var config = Config(); config.Strategy = "保持生命"; config.DecisionDelaySeconds = 1.5;
         config.Save(path);
         var saved = File.ReadAllText(path);
         Check(!saved.Contains(config.ApiKey), "secret encrypted at rest");
         Check(saved.Contains("ApiKeyProtected"), "encrypted field");
         var loaded = AutopilotConfig.Load(path);
         Check(loaded.ApiKey == config.ApiKey && loaded.Strategy == config.Strategy && loaded.DecisionDelaySeconds == 1.5, "roundtrip");
-        Check(loaded.PrimarySolverTimeoutSeconds == 120, "primary solver timeout persists");
         File.WriteAllText(Path.Combine(dir, "legacy.json"), "{}");
-        Check(AutopilotConfig.Load(Path.Combine(dir, "legacy.json")).PrimarySolverTimeoutSeconds == 120, "older configurations default to one hundred twenty seconds");
         config.ApiKey = ""; config.Save(path);
         Check(AutopilotConfig.Load(path).ApiKey == "", "clear key");
         Check(AutopilotConfig.Load(Path.Combine(dir, "absent.json")).RequestTimeoutSeconds == 45, "default config");
@@ -509,6 +507,59 @@ await Test("failed or incomplete Responses never commit even with valid content"
     }
 });
 
+await Test("malformed successful envelope remains a retryable protocol error", async () =>
+{
+    foreach (bool responses in new[] { false, true })
+    foreach (string payload in new[] { "null", "[]", "42", "{\"choices\":null}", "{\"output\":null}" })
+    {
+        using var http = new HttpClient(new FakeHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+            { Content = new StringContent(payload, Encoding.UTF8, "application/json") })));
+        using var client = new ProviderClient(http);
+        var config = Config(); config.ApiMode = responses ? "Responses" : "ChatCompletions";
+        await Throws<ModelProtocolException>(() => client.DecideAsync(config, Frame(), CancellationToken.None));
+    }
+});
+
+await Test("chat truncation does not execute or commit a partial completion", async () =>
+{
+    int call = 0; var counts = new List<int>();
+    using var http = new HttpClient(new FakeHandler(async (request, ct) =>
+    {
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+        counts.Add(body.RootElement.GetProperty("messages").GetArrayLength());
+        return JsonResponse(new { choices = new[] { new { finish_reason = ++call == 1 ? "length" : "stop", message = new { content = "{\"actionId\":\"map:1\"}" } } } });
+    }));
+    using var client = new ProviderClient(http);
+    await Throws<ModelProtocolException>(() => client.DecideAsync(Config(), Frame(), CancellationToken.None));
+    await client.DecideAsync(Config(), Frame(), CancellationToken.None);
+    Check(counts.SequenceEqual(new[] { 3, 3 }), "partial response omitted from session");
+});
+
+await Test("response body interruption is retryable and leaves session intact", async () =>
+{
+    using var http = new HttpClient(new FakeHandler((_, _) => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+        { Content = new BrokenContent() })));
+    using var client = new ProviderClient(http);
+    await Throws<ProviderTransientException>(() => client.DecideAsync(Config(), Frame(), CancellationToken.None));
+});
+
+await Test("map planning requires the model selected full route before session commit", async () =>
+{
+    int call = 0; var counts = new List<int>();
+    using var http = new HttpClient(new FakeHandler(async (request, ct) =>
+    {
+        using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(ct));
+        counts.Add(body.RootElement.GetProperty("messages").GetArrayLength());
+        Check(body.RootElement.GetProperty("messages")[0].GetProperty("content").GetString()!.Contains("routeOptionId"), "map reply contract in instructions");
+        return Chat(++call == 1 ? "{\"actionId\":\"map:1\"}" : "{\"actionId\":\"map:1\",\"routeOptionId\":\"route-001\"}");
+    }));
+    using var client = new ProviderClient(http);
+    var frame = Frame() with { State = new { mapPlanningRequired = true, routeOptions = new[] { new { id = "route-001", firstActionId = "map:1" } } } };
+    await Throws<ModelProtocolException>(() => client.DecideAsync(Config(), frame, CancellationToken.None));
+    Check((await client.DecideAsync(Config(), frame, CancellationToken.None)).RouteOptionId == "route-001", "model owns complete route choice");
+    Check(counts.SequenceEqual(new[] { 3, 3 }), "incomplete map proposal stays outside session");
+});
+
 Console.WriteLine($"RESULT passed={passed} failed={failures.Count}");
 foreach (var failure in failures) Console.WriteLine(failure);
 return failures.Count == 0 ? 0 : 1;
@@ -521,4 +572,11 @@ sealed class FakeHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpRe
         Calls++;
         return handler(request, cancellationToken);
     }
+}
+
+sealed class BrokenContent : HttpContent
+{
+    protected override bool TryComputeLength(out long length) { length = 0; return false; }
+    protected override Task SerializeToStreamAsync(Stream stream, System.Net.TransportContext? context)
+        => Task.FromException(new IOException("response stream interrupted"));
 }

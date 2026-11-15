@@ -1,6 +1,6 @@
 {
-  "BaseUrl": "https://api.deepseek.com",
-  "Model": "deepseek-flash",
+  "BaseUrl": "https://api.openai.com/v1",
+  "Model": "your-model-id",
   "ApiMode": "Responses",
   "PersistentSession": true,
   "SessionMaxTurns": 12,
@@ -16,10 +16,9 @@
   "BroadcastMode": true,
   "LightweightSolverDiagnostics": true,
   "AllowNativeUiFallback": true,
-  "ThinkingEnabled": false,
+  "ThinkingEnabled": null,
   "UseJsonMode": true,
   "ApiKeyProtected": "",
-  "PrimarySolverTimeoutSeconds": 120,
   "ReflectAfterRun": true,
   "UseRunExperience": true
 }

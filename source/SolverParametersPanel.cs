@@ -24,19 +24,19 @@ public partial class SolverParametersPanel : VBoxContainer
         if (initialized) return;
         initialized = true; SizeFlagsHorizontal = SizeFlags.ExpandFill;
         AddThemeConstantOverride("separation", 9);
-        AddChild(Wrap("全部求解器参数 · 修改后点击应用，下次搜索采用新设置。"));
+        AddChild(Wrap("CombatSolver 参数；应用后下次搜索生效。"));
         var tools = new HBoxContainer(); AddChild(tools);
         category = new OptionButton { CustomMinimumSize = new(150, 36) }; tools.AddChild(category);
         filter = new LineEdit { PlaceholderText = "搜索名称或字段", SizeFlagsHorizontal = SizeFlags.ExpandFill }; tools.AddChild(filter);
         var buttons = new HBoxContainer(); AddChild(buttons);
-        var apply = new Button { Text = "应用求解器设置" }; apply.Pressed += () => CommitPending(); buttons.AddChild(apply);
+        var apply = new Button { Text = "应用设置" }; apply.Pressed += () => CommitPending(); buttons.AddChild(apply);
         var reload = new Button { Text = "重新读取" }; reload.Pressed += Reload; buttons.AddChild(reload);
-        var reset = new Button { Text = "恢复求解器默认" }; reset.Pressed += () =>
+        var reset = new Button { Text = "恢复默认" }; reset.Pressed += () =>
         {
-            try { SolverSettingsAccess.ResetDefaults(); Reload(); SetStatus("已恢复求解器默认设置，下次搜索生效。", false); }
+            try { SolverSettingsAccess.ResetDefaults(); Reload(); SetStatus("已恢复默认，下次搜索生效。", false); }
             catch (Exception ex) { SetStatus("恢复默认：" + ex.Message, true); }
         }; buttons.AddChild(reset);
-        status = Wrap("正在读取求解器参数…"); AddChild(status);
+        status = Wrap("读取参数…"); AddChild(status);
         fieldHost = new VBoxContainer { SizeFlagsHorizontal = SizeFlags.ExpandFill }; fieldHost.AddThemeConstantOverride("separation", 11); AddChild(fieldHost);
         category.ItemSelected += _ => Rebuild(); filter.TextChanged += _ => Rebuild();
         Reload();
@@ -55,7 +55,7 @@ public partial class SolverParametersPanel : VBoxContainer
             category.Clear(); category.AddItem("全部分类");
             foreach (var group in groups) category.AddItem(GroupLabel(group));
             int index = selected == null ? -1 : Array.IndexOf(groups, selected); category.Select(index + 1);
-            Rebuild(); SetStatus($"已读取 {fields.Count} 项求解器参数。", false);
+            Rebuild(); SetStatus($"{fields.Count} 项参数", false);
         }
         catch (Exception ex) { SetStatus("等待求解器参数：" + ex.Message, true); }
     }
@@ -75,7 +75,7 @@ public partial class SolverParametersPanel : VBoxContainer
             if (!string.IsNullOrWhiteSpace(field.Description)) { var hint = Wrap(field.Description); hint.AddThemeFontSizeOverride("font_size", 13); hint.AddThemeColorOverride("font_color", AutopilotTheme.Muted); section.AddChild(hint); }
             section.AddChild(new HSeparator()); visible++;
         }
-        if (visible == 0) fieldHost.AddChild(Wrap("当前筛选结果为 0 项，可调整分类或关键词。"));
+        if (visible == 0) fieldHost.AddChild(Wrap("筛选结果：0 项"));
     }
 
     private void BuildEditor(VBoxContainer host, SolverParameter field, object? original)
@@ -127,7 +127,7 @@ public partial class SolverParametersPanel : VBoxContainer
                 var changed = complete(); var saved = values.GetValueOrDefault(field.Name);
                 bool equal = Equals(changed, saved) || changed != null && saved != null && SolverSettingsAccess.FormatComplex(changed) == SolverSettingsAccess.FormatComplex(saved);
                 if (equal) dirty.Remove(field.Name); else dirty[field.Name] = changed;
-                SetStatus($"待应用 {dirty.Count} 项更改。", false);
+                SetStatus($"待应用：{dirty.Count} 项", false);
             }
             catch (Exception ex) { dirty[field.Name] = new PendingInvalid(ex.Message); SetStatus(field.Label + "：" + ex.Message, true); }
         }
@@ -141,9 +141,9 @@ public partial class SolverParametersPanel : VBoxContainer
             foreach (string name in dirty.Keys.ToArray())
                 if (editors.TryGetValue(name, out var read)) dirty[name] = read();
             foreach (var pair in dirty) if (pair.Value is PendingInvalid invalid) throw new InvalidOperationException(pair.Key + "：" + invalid.Message);
-            if (dirty.Count == 0) { SetStatus("当前设置已保存。", false); return true; }
+            if (dirty.Count == 0) { SetStatus("设置已保存", false); return true; }
             int count = dirty.Count; SolverSettingsAccess.Save(new Dictionary<string, object?>(dirty, StringComparer.Ordinal)); Reload();
-            SetStatus($"已应用 {count} 项更改，下次搜索生效。", false); return true;
+            SetStatus($"已应用 {count} 项，下次搜索生效。", false); return true;
         }
         catch (Exception ex) { SetStatus("设置校验：" + ex.Message, true); return false; }
     }

@@ -6,15 +6,23 @@ using System.Text.RegularExpressions;
 
 namespace SpireAutopilot;
 
-/// <summary>One local report per finished run; checkpoints retain a bounded, sanitized run journal.</summary>
+/// <summary>One rolling summary; run checkpoints survive interrupted updates.</summary>
 public sealed class RunExperienceStore
 {
     private const int MaximumEntries = 120, MaximumCheckpointBytes = 128 * 1024, MaximumNoteCharacters = 6000;
-    private const string DocumentPrefix = "<!-- spire-autopilot-run:";
+    private const string SummaryMarker = "<!-- spire-autopilot-experience:";
+    private const string LegacyMarker = "<!-- spire-autopilot-run:";
+    private string SummaryPath => Path.Combine(directory, "experience.md");
+    private string? expectedSummaryHash;
+    private List<LegacyNote>? migration;
+    private sealed record LegacyNote(string Id, string Path, string Text, string Hash);
+    private sealed record Summary(string Text, string Hash, HashSet<string> Runs);
     private readonly string directory;
     private readonly object gate = new();
     private JsonObject? run;
+    private readonly Queue<JsonObject> pendingRuns = new();
     private DecisionFrame? frame;
+    public string? RestoreDiagnostic { get; private set; }
     private static readonly Regex Credential = new(@"\b(?:sk-|Bearer\s+)[A-Za-z0-9._~+/=-]{8,}", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex Assignment = new(@"\b(?:api[_ -]?key|authorization|password|access[_ -]?token|secret)\s*[:=]\s*[^\s,;]+", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
@@ -23,17 +31,34 @@ public sealed class RunExperienceStore
         ArgumentException.ThrowIfNullOrWhiteSpace(directory);
         this.directory = Path.GetFullPath(directory);
         if (!Directory.Exists(this.directory)) return;
-        // A finished pending checkpoint takes priority after restart. Active runs are resumed
-        // explicitly by BeginRun, which supplies their stable native run identity.
-        foreach (string path in Directory.EnumerateFiles(this.directory, "checkpoint-*.json").OrderByDescending(File.GetLastWriteTimeUtc))
+        Summary summary = ReadSummary();
+        RetireCompleted(summary);
+        // Finished journals and the current run have independent lifetimes. Retain all pending
+        // reports across restarts while BeginRun resumes the live run by native identity.
+        foreach (string path in Directory.EnumerateFiles(this.directory, "checkpoint-*.json*")
+            .Where(p => p.EndsWith(".json", StringComparison.Ordinal) || p.EndsWith(".json.tmp", StringComparison.Ordinal) || p.EndsWith(".json.bak", StringComparison.Ordinal))
+            .Select(p => p.EndsWith(".json", StringComparison.Ordinal) ? p : p[..^4]).Distinct(StringComparer.Ordinal)
+            .OrderBy(p => File.GetLastWriteTimeUtc(File.Exists(p) ? p : File.Exists(p + ".tmp") ? p + ".tmp" : p + ".bak"))
+            .ThenBy(p => p, StringComparer.Ordinal))
         {
             JsonObject? candidate = ReadCheckpoint(path);
-            if (candidate?["pending"]?.GetValue<bool>() == true && !File.Exists(NotePath(candidate["id"]!.GetValue<string>())))
-            { run = candidate; break; }
+            if (candidate?["pending"]?.GetValue<bool>() == true && !summary.Runs.Contains(candidate["id"]!.GetValue<string>()))
+                pendingRuns.Enqueue(candidate);
         }
     }
 
-    public bool HasPendingReflection { get { lock (gate) return run?["pending"]?.GetValue<bool>() == true; } }
+    public bool HasPendingReflection
+    {
+        get
+        {
+            lock (gate)
+            {
+                Summary summary = ReadSummary();
+                return pendingRuns.Any(r => !summary.Runs.Contains(r["id"]!.GetValue<string>()))
+                    || LegacyNotes(summary).Count > 0;
+            }
+        }
+    }
 
     public void BeginRun(string runKey, object snapshot)
     {
@@ -41,16 +66,14 @@ public sealed class RunExperienceStore
         lock (gate)
         {
             string id = Hash(runKey);
-            if (run?["id"]?.GetValue<string>() == id || File.Exists(NotePath(id))) return;
-            // Finish the previous report before replacing the in-memory pending run.
-            if (HasPendingReflection) return;
+            if (run?["id"]?.GetValue<string>() == id || ReadSummary().Runs.Contains(id)
+                || pendingRuns.Any(r => r["id"]?.GetValue<string>() == id)) return;
             run = ReadCheckpoint(CheckpointPath(id)) ?? new JsonObject
             {
                 ["id"] = id, ["startedUtc"] = DateTimeOffset.UtcNow.ToString("O"),
                 ["start"] = Safe(snapshot), ["entries"] = new JsonArray(), ["pending"] = false, ["droppedEntries"] = 0,
                 ["decisionSummary"] = new JsonObject(),
             };
-            frame = null;
             SaveCheckpoint();
         }
     }
@@ -59,7 +82,7 @@ public sealed class RunExperienceStore
     {
         lock (gate)
         {
-            if (run == null || HasPendingReflection) return;
+            if (run == null) return;
             var value = Safe(snapshot);
             var entries = (JsonArray)run["entries"]!;
             if (entries.LastOrDefault() is JsonObject previous && previous["kind"]?.GetValue<string>() == "observation"
@@ -72,7 +95,7 @@ public sealed class RunExperienceStore
     {
         lock (gate)
         {
-            if (run == null || HasPendingReflection) return;
+            if (run == null) return;
             string category = scene.Contains("Map", StringComparison.OrdinalIgnoreCase) ? "map_route"
                 : scene.Contains("Shop", StringComparison.OrdinalIgnoreCase) || scene.Contains("Merchant", StringComparison.OrdinalIgnoreCase) ? "shop"
                 : scene.Contains("Event", StringComparison.OrdinalIgnoreCase) ? "events"
@@ -94,24 +117,40 @@ public sealed class RunExperienceStore
         }
     }
 
-    /// <summary>The host calls this only after the native game reports the whole run finished.</summary>
     public DecisionFrame? CreateReflectionFrame(object? outcome)
     {
         lock (gate)
         {
-            if (run == null) return null;
-            string id = run["id"]!.GetValue<string>();
-            if (File.Exists(NotePath(id))) { run = null; frame = null; return null; }
-            if (!HasPendingReflection)
+            if (run != null && outcome != null)
             {
                 run["outcome"] = Safe(outcome); run["finishedUtc"] = DateTimeOffset.UtcNow.ToString("O"); run["pending"] = true;
-                SaveCheckpoint();
+                SaveCheckpoint(); pendingRuns.Enqueue(run); run = null;
             }
-            var evidence = (JsonObject)run.DeepClone();
-            evidence["task"] = "为已结束的整局游戏写一份独立Markdown游戏经验文档，填写runExperienceNote（最多6000字符）。总结结局、地图路线、构筑、事件与商店决策、怪物战损和改进建议；区分观测与推断。";
-            string token = "run-reflection:" + id + ":" + Hash(run.ToJsonString());
-            return frame = new DecisionFrame(token, "RunReflection", evidence,
-                new[] { new LegalAction("write_run_experience", "写本局游戏经验", "reflection") });
+            Summary summary = ReadSummary();
+            RetireCompleted(summary);
+            while (pendingRuns.TryPeek(out var done) && summary.Runs.Contains(done["id"]!.GetValue<string>()))
+                pendingRuns.Dequeue();
+            expectedSummaryHash = summary.Hash;
+            migration = LegacyNotes(summary);
+            if (migration.Count > 0)
+            {
+                var state = new JsonObject
+                {
+                    ["task"] = "将旧逐局记录合并到总体经验总结。保留适用条件，合并重复项，修正冲突；填写完整runExperienceNote（中文Markdown，最多6000字符）。",
+                    ["previousExperience"] = summary.Text,
+                    ["legacyNotes"] = new JsonArray(migration.Select(n => (JsonNode)new JsonObject { ["id"] = n.Id, ["text"] = n.Text }).ToArray()),
+                };
+                string token = "experience-migration:" + Hash(string.Join("|", migration.Select(n => n.Id + ":" + n.Hash))) + ":" + summary.Hash;
+                return frame = new DecisionFrame(token, "RunReflection", state,
+                    new[] { new LegalAction("write_run_experience", "合并经验总结", "reflection") });
+            }
+            migration = null;
+            if (!pendingRuns.TryPeek(out var pending)) { frame = null; return null; }
+            var evidence = (JsonObject)pending.DeepClone();
+            evidence["previousExperience"] = summary.Text;
+            evidence["task"] = "根据本局记录更新总体经验总结。保留仍适用的经验，合并重复项，修正旧结论，标明角色、牌组与适用条件；区分观测与推断。填写完整runExperienceNote（中文Markdown，最多6000字符），用于替换原总结。";
+            return frame = new DecisionFrame(ReflectionToken(pending, summary.Hash), "RunReflection", evidence,
+                new[] { new LegalAction("write_run_experience", "更新经验总结", "reflection") });
         }
     }
 
@@ -119,27 +158,47 @@ public sealed class RunExperienceStore
     {
         lock (gate)
         {
-            if (run == null || !HasPendingReflection || frame == null || frame.Token != token || decision.ActionId != "write_run_experience") return false;
-            string? note = decision.RunExperienceNote;
-            if (string.IsNullOrWhiteSpace(note) || note.Length > MaximumNoteCharacters) return false;
-            string id = run["id"]!.GetValue<string>(), checkpoint = CheckpointPath(id);
-            var persisted = ReadCheckpoint(checkpoint);
-            if (persisted == null || "run-reflection:" + id + ":" + Hash(persisted.ToJsonString()) != token) return false;
-            string target = NotePath(id);
-            string clean = Clean(note, int.MaxValue, actualApiKey).Replace(DocumentPrefix, "[经验标记]", StringComparison.Ordinal).Trim();
+            if (frame == null || frame.Token != token || decision.ActionId != "write_run_experience") return false;
+            if (string.IsNullOrWhiteSpace(decision.RunExperienceNote) || decision.RunExperienceNote.Length > MaximumNoteCharacters) return false;
+            string clean = Clean(decision.RunExperienceNote, int.MaxValue, actualApiKey)
+                .Replace(SummaryMarker, "[经验标记]", StringComparison.Ordinal)
+                .Replace(LegacyMarker, "[经验标记]", StringComparison.Ordinal).Trim();
             if (string.IsNullOrWhiteSpace(clean) || clean.Length > MaximumNoteCharacters) return false;
             Directory.CreateDirectory(directory);
-            if (!File.Exists(target))
+            using var writeLock = new FileStream(Path.Combine(directory, ".experience.lock"), FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+            Summary summary = ReadSummary();
+            if (summary.Hash != expectedSummaryHash) return false;
+            string? checkpoint = null;
+            if (migration != null)
             {
-                string content = DocumentPrefix + id + " -->\n# 整局游戏经验\n\n"
-                    + "记录时间：" + run["finishedUtc"]!.GetValue<string>() + "\n\n经验为本局观测归纳，适用性须结合当前局面验证。\n\n" + clean + "\n";
-                string temporary = target + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                try { File.WriteAllText(temporary, content, new UTF8Encoding(false)); File.Move(temporary, target, false); }
-                catch (IOException) when (File.Exists(target)) { }
-                finally { if (File.Exists(temporary)) File.Delete(temporary); }
+                if (migration.Any(n => !File.Exists(n.Path) || Hash(File.ReadAllText(n.Path)) != n.Hash)) return false;
+                foreach (var note in migration) summary.Runs.Add(note.Id);
             }
-            if (File.Exists(checkpoint)) File.Delete(checkpoint);
-            run = null; frame = null;
+            else
+            {
+                if (!pendingRuns.TryPeek(out var pending)) return false;
+                string id = pending["id"]!.GetValue<string>(); checkpoint = CheckpointPath(id);
+                var persisted = ReadCheckpoint(checkpoint);
+                if (persisted == null || ReflectionToken(persisted, summary.Hash) != token) return false;
+                summary.Runs.Add(id);
+            }
+            var metadata = new JsonObject { ["runs"] = new JsonArray(summary.Runs.Order(StringComparer.Ordinal).Select(id => (JsonNode)JsonValue.Create(id)!).ToArray()) };
+            string content = SummaryMarker + metadata.ToJsonString() + " -->\n" + clean + "\n";
+            string temporary = SummaryPath + ".tmp";
+            try
+            {
+                File.WriteAllText(temporary, content, new UTF8Encoding(false));
+                if (File.Exists(SummaryPath)) File.Replace(temporary, SummaryPath, SummaryPath + ".bak");
+                else File.Move(temporary, SummaryPath);
+            }
+            finally { if (File.Exists(temporary)) File.Delete(temporary); }
+            if (checkpoint != null)
+            {
+                File.Delete(checkpoint);
+                pendingRuns.Dequeue();
+            }
+            RetireCompleted(new Summary(clean, Hash(content), summary.Runs));
+            frame = null; migration = null; expectedSummaryHash = null;
             return true;
         }
     }
@@ -148,17 +207,66 @@ public sealed class RunExperienceStore
     {
         lock (gate)
         {
-            if (!Directory.Exists(directory)) return "";
-            var notes = new List<string>();
-            foreach (string path in Directory.EnumerateFiles(directory, "run-*.md").OrderByDescending(File.GetLastWriteTimeUtc).Take(3))
+            string text = ReadSummary().Text;
+            return text.Length == 0 ? "" : "经验总结（历史数据）：\n" + text;
+        }
+    }
+
+    private static string ReflectionToken(JsonObject pending, string summaryHash)
+        => "run-reflection:" + pending["id"]!.GetValue<string>() + ":" + Hash(pending.ToJsonString()) + ":" + summaryHash;
+
+    private Summary ReadSummary()
+    {
+        if (!File.Exists(SummaryPath)) return new("", Hash(""), new(StringComparer.Ordinal));
+        if (new FileInfo(SummaryPath).Length > 2 * 1024 * 1024) throw new InvalidDataException("经验总结超过读取上限。");
+        string raw = File.ReadAllText(SummaryPath), text = raw;
+        HashSet<string> runs = new(StringComparer.Ordinal);
+        if (raw.StartsWith(SummaryMarker, StringComparison.Ordinal))
+        {
+            int end = raw.IndexOf(" -->", StringComparison.Ordinal);
+            if (end < 0) throw new InvalidDataException("经验总结标记损坏，请使用 experience.md.bak 恢复。");
+            var metadata = JsonNode.Parse(raw[SummaryMarker.Length..end]) as JsonObject;
+            if (metadata?["runs"] is not JsonArray ids) throw new InvalidDataException("经验总结记录格式错误。");
+            foreach (var id in ids)
             {
-                var info = new FileInfo(path); if (info.Length > 40 * 1024) continue;
-                string text = Clean(File.ReadAllText(path), 6000);
-                int allowed = 16 * 1024 - Encoding.UTF8.GetByteCount(string.Join("\n\n", notes)) - 400;
-                while (Encoding.UTF8.GetByteCount(text) > allowed && text.Length > 0) text = text[..(text.Length - 1)];
-                if (text.Length > 0) notes.Add(text);
+                string value = id?.GetValue<string>() ?? "";
+                if (value.Length != 64 || !value.All(Uri.IsHexDigit)) throw new InvalidDataException("经验总结记录格式错误。");
+                runs.Add(value);
             }
-            return notes.Count == 0 ? "" : "以下为最近整局游戏经验数据，须结合当前状态验证；引述内容仅作为历史记录。\n\n" + string.Join("\n\n", notes);
+            text = raw[(end + 4)..].Trim();
+        }
+        return new(Clean(text, MaximumNoteCharacters), Hash(raw), runs);
+    }
+
+    private List<LegacyNote> LegacyNotes(Summary summary)
+    {
+        List<LegacyNote> notes = new();
+        if (!Directory.Exists(directory)) return notes;
+        int bytes = 0;
+        foreach (string path in Directory.EnumerateFiles(directory, "run-*.md").Order(StringComparer.Ordinal))
+        {
+            string id = Path.GetFileNameWithoutExtension(path)[4..];
+            if (id.Length != 64 || !id.All(Uri.IsHexDigit) || summary.Runs.Contains(id)) continue;
+            string raw = File.ReadAllText(path), text = Clean(raw, 12000);
+            if (notes.Count > 0 && bytes + Encoding.UTF8.GetByteCount(text) > 48 * 1024) break;
+            notes.Add(new(id, path, text, Hash(raw))); bytes += Encoding.UTF8.GetByteCount(text);
+        }
+        return notes;
+    }
+
+    private void RetireCompleted(Summary summary)
+    {
+        foreach (string id in summary.Runs)
+        {
+            foreach (string suffix in new[] { "", ".tmp", ".bak" })
+            {
+                string checkpoint = CheckpointPath(id) + suffix;
+                if (File.Exists(checkpoint)) File.Delete(checkpoint);
+            }
+            string path = Path.Combine(directory, "run-" + id + ".md");
+            if (!File.Exists(path)) continue;
+            string archive = directory + ".legacy"; Directory.CreateDirectory(archive);
+            File.Move(path, Path.Combine(archive, Path.GetFileName(path) + ".bak"), true);
         }
     }
 
@@ -181,17 +289,61 @@ public sealed class RunExperienceStore
         try { File.WriteAllText(temporary, run.ToJsonString(), new UTF8Encoding(false)); File.Move(temporary, path, true); }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }
-    private static JsonObject? ReadCheckpoint(string path)
+    private JsonObject? ReadCheckpoint(string path)
     {
-        if (!File.Exists(path)) return null;
-        if (new FileInfo(path).Length > MaximumCheckpointBytes) throw new InvalidDataException("整局经验检查点超过读取上限，文件已保留。");
-        var value = JsonNode.Parse(File.ReadAllText(path)) as JsonObject;
-        string? id = value?["id"]?.GetValue<string>();
-        if (id == null || id.Length != 64 || !id.All(Uri.IsHexDigit) || value!["entries"] is not JsonArray)
-            throw new InvalidDataException("整局经验检查点格式需要修复，文件已保留。");
-        return value;
+        JsonObject? ReadValid(string candidate)
+        {
+            if (!File.Exists(candidate)) return null;
+            if (new FileInfo(candidate).Length > MaximumCheckpointBytes) throw new InvalidDataException("checkpoint size");
+            var parsed = JsonNode.Parse(File.ReadAllText(candidate), documentOptions: new JsonDocumentOptions { MaxDepth = 24 }) as JsonObject;
+            ValidateCheckpoint(parsed, path);
+            return parsed;
+        }
+        string? failure = null;
+        foreach (string candidate in new[] { path, path + ".tmp", path + ".bak" })
+        {
+            try
+            {
+                var value = ReadValid(candidate);
+                if (value == null) continue;
+                if (candidate != path)
+                {
+                    if (File.Exists(path)) Preserve(path);
+                    string restore = path + ".recovering";
+                    try { File.Copy(candidate, restore, true); File.Move(restore, path, true); }
+                    finally { if (File.Exists(restore)) File.Delete(restore); }
+                    RestoreDiagnostic = "整局经验检查点已从有效副本恢复：" + candidate;
+                }
+                return value;
+            }
+            catch (Exception error) when (error is JsonException or InvalidDataException or InvalidOperationException or FormatException)
+            { failure ??= error.GetType().Name; }
+        }
+        if (failure != null)
+        {
+            if (File.Exists(path)) Preserve(path);
+            RestoreDiagnostic = "整局经验检查点需要恢复，原始字节已另存，其他记录继续使用：" + path + "；" + failure;
+        }
+        return null;
     }
-    private string NotePath(string id) => Path.Combine(directory, "run-" + id + ".md");
+    private static void Preserve(string path)
+    {
+        string preserved = path + ".invalid-" + Guid.NewGuid().ToString("N");
+        File.Move(path, preserved, false);
+    }
+    private static void ValidateCheckpoint(JsonObject? value, string path)
+    {
+        string? id = value?["id"]?.GetValue<string>();
+        if (id == null || id.Length != 64 || !id.All(Uri.IsHexDigit) || value!["entries"] is not JsonArray entries
+            || Path.GetFileName(path) != "checkpoint-" + id + ".json"
+            || value["pending"] is not JsonValue pending || !pending.TryGetValue<bool>(out bool finished)
+            || value["droppedEntries"] is not JsonValue dropped || !dropped.TryGetValue<int>(out int count) || count < 0
+            || entries.Count > MaximumEntries || entries.Any(e => e is not JsonObject)
+            || !DateTimeOffset.TryParse(value["startedUtc"]?.GetValue<string>(), out _)
+            || finished && !DateTimeOffset.TryParse(value["finishedUtc"]?.GetValue<string>(), out _)
+            || value["decisionSummary"] is not JsonObject summary || summary.Any(p => p.Value is not JsonArray a || a.Any(v => v is not JsonObject)))
+            throw new InvalidDataException("整局经验检查点格式需要修复，文件已保留。");
+    }
     private string CheckpointPath(string id) => Path.Combine(directory, "checkpoint-" + id + ".json");
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     private static string Clean(string? text, int limit, string? apiKey = null)
