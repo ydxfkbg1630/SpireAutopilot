@@ -427,11 +427,11 @@ public partial class AutopilotHost : Node
             if (retryToken != requestToken) { retryToken = requestToken; retryCount = 0; }
             if (requestToken is not null && ++retryCount <= 2)
             {
-                Record($"模型回复需要重新获取，重试 {retryCount}/2（{ex.GetType().Name}：{ex.Message}）。");
-                SetStatus("正在重新读取局面并获取模型决策…");
+                Record($"{ModelFailureStage(ex)}，重试 {retryCount}/2：{ex.Message}");
+                SetStatus(ModelFailureStage(ex) + "，正在重试…");
                 nextPoll = clock + retryCount;
             }
-            else Pause("模型连续请求异常，已暂停。F9 可重新尝试。");
+            else Pause(ModelFailureStage(ex) + "：" + ex.Message + " F9 重试。");
         }
         catch (Exception ex)
         {
@@ -440,6 +440,15 @@ public partial class AutopilotHost : Node
         }
         finally { modelThinking = false; pending = null; busy = false; }
     }
+    private static string ModelFailureStage(Exception error) => error switch
+    {
+        ProviderFormatException => "响应 JSON 解析异常",
+        ModelProtocolException => "模型回复格式或动作校验异常",
+        TimeoutException => "模型响应超时",
+        ProviderTransientException => "接口连接或服务异常",
+        _ => "模型处理异常"
+    };
+
     private void RecordUsage(ProviderUsage? usage, bool showCurrent = true)
     {
         totalRequests++;

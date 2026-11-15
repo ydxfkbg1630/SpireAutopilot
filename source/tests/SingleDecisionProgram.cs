@@ -33,6 +33,8 @@ try
     var result = await provider.DecideAsync(config, frame, CancellationToken.None);
     report["actionId"] = Safe(result.ActionId);
     report["reason"] = Safe(result.Reason);
+    report["routeOptionId"] = result.RouteOptionId;
+    report["routePlan"] = result.RoutePlan;
     report["usage"] = result.Usage;
     report["success"] = true;
 }

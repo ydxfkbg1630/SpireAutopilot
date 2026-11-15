@@ -574,6 +574,16 @@ await Test("reflection rejects defensive prose and accepts actionable affirmativ
     Check(client.LastRejectedExperienceToken == frame.Token && client.LastRejectedExperienceNote!.Contains("无法"), "rewrite draft is scoped to the exact pending reflection");
     Check(ExperienceSummaryRules.Accepts("生命低于20时优先安排休息，回复后再进入精英房。"), "affirmative conditional guidance accepted");
 });
+await Test("map route supports candidate coordinate arrays and object spellings with strict integers", async () =>
+{
+    foreach (string coordinates in new[] { "[[0,3],[1,0]]", "[{\"row\":0,\"column\":3},{\"row\":1,\"column\":0}]", "[{\"Row\":0,\"Column\":3},{\"Row\":1,\"Column\":0}]" })
+    {
+        var value = ProviderClient.ParseDecision("{\"actionId\":\"map:1\",\"routePlan\":" + coordinates + "}", Frame().Actions);
+        Check(value.RoutePlan!.SequenceEqual(new[] { new RouteStep(0,3), new RouteStep(1,0) }), "equivalent route encoding");
+    }
+    foreach (string invalid in new[] { "[[1]]", "[[1,2,3]]", "[[1.5,2]]", "[[\"1\",2]]", "[null]", "[{\"row\":1}]" })
+        await Throws<ModelProtocolException>(() => Task.FromResult(ProviderClient.ParseDecision("{\"actionId\":\"map:1\",\"routePlan\":" + invalid + "}", Frame().Actions)));
+});
 Console.WriteLine($"RESULT passed={passed} failed={failures.Count}");
 foreach (var failure in failures) Console.WriteLine(failure);
 return failures.Count == 0 ? 0 : 1;
