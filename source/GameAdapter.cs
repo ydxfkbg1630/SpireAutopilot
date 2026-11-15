@@ -193,7 +193,7 @@ public sealed partial class GameAdapter
             actMap = SnapshotActMap(run),
             player = SnapshotPlayer(player), context = extra,
             // Visible controls include enabled/selection state, but exclude position, animation, frame clock and VFX.
-            controls = Walk(scene).Where(n => n is NClickableControl || n is NCardHolder).Where(LiveVisible)
+            controls = Walk(CardSelectionScope(scene)).Where(n => n is NClickableControl || n is NCardHolder).Where(LiveVisible)
                 .Select(n => new { id = n.GetInstanceId(), type = n.GetType().Name, enabled = n is NClickableControl b ? b.IsEnabled : Member(n, "_isClickable") }).ToArray()
         };
         var stable = JsonSerializer.Serialize(new { state, actions });
@@ -265,6 +265,14 @@ public sealed partial class GameAdapter
         return new { inventory.IsOpen, blocked, stock = slots.Select(s => new { node = s.GetInstanceId(), s.Entry.Cost, s.Entry.IsStocked, s.Entry.EnoughGold, item = SnapshotModel(MerchantModel(s.Entry)), type = s.Entry.GetType().Name }).ToArray() };
     }
 
+    private static Node CardSelectionScope(Node scene)
+    {
+        if (scene is not ICardSelectionScreen) return scene;
+        foreach (string name in new[] { "_previewContainer", "_upgradeSinglePreviewContainer", "_upgradeMultiPreviewContainer", "_enchantSinglePreviewContainer", "_enchantMultiPreviewContainer", "_bundlePreviewContainer" })
+            if (Member(scene, name) is Control preview && LiveVisible(preview)) return preview;
+        return scene;
+    }
+
     private object CaptureCards(Node scene)
     {
         object? completion = Member(scene, "_completionSource");
@@ -276,8 +284,8 @@ public sealed partial class GameAdapter
         { selectionWaiting = true; Status = "等待选牌界面入场完成。"; return new { selectionEntering = true }; }
         var selected = Items(Member(scene, "_selectedCards")).OfType<CardModel>().ToArray();
         var prefs = Member(scene, "_prefs");
-        var previewNames = new[] { "_previewContainer", "_upgradeSinglePreviewContainer", "_upgradeMultiPreviewContainer", "_enchantSinglePreviewContainer", "_enchantMultiPreviewContainer", "_bundlePreviewContainer" };
-        bool preview = previewNames.Any(name => Member(scene, name) is Control c && c.Visible);
+        Node selectionScope = CardSelectionScope(scene);
+        bool preview = !ReferenceEquals(selectionScope, scene);
         var grid = Walk(scene).OfType<NCardGrid>().FirstOrDefault();
         var holders = Walk(scene).OfType<NCardHolder>().Where(LiveVisible).Where(h => h.CardModel != null && h.GetType().Name != "NPreviewCardHolder").ToArray();
         if (!preview)
@@ -296,7 +304,7 @@ public sealed partial class GameAdapter
                 });
             }
         }
-        foreach (var button in Walk(scene).OfType<NClickableControl>().Where(Enabled))
+        foreach (var button in Walk(selectionScope).OfType<NClickableControl>().Where(Enabled))
         {
             string type = button.GetType().Name;
             if (type is "NConfirmButton" or "NChoiceSelectionSkipButton" or "NCardRewardAlternativeButton")
@@ -310,7 +318,9 @@ public sealed partial class GameAdapter
             selectionSession = completion == null ? (int?)null : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(completion),
             prompt = Text(Member(prefs, "Prompt")), minSelect = Member(prefs, "MinSelect"), maxSelect = Member(prefs, "MaxSelect"),
             cancelable = Member(prefs, "Cancelable"), manualConfirmation = Member(prefs, "RequireManualConfirmation"), preview,
-            selected = selected.Select(SnapshotCard).ToArray(), text = VisibleTexts(scene)
+            selected = selected.Select(SnapshotCard).ToArray(),
+            transformPreview = preview && scene is NDeckTransformSelectScreen ? "确认执行随机变化；轮播卡牌为动画示意" : null,
+            text = preview && scene is NDeckTransformSelectScreen ? Array.Empty<string>() : VisibleTexts(selectionScope)
         };
     }
 

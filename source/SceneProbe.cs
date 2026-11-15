@@ -36,13 +36,14 @@ public static class SceneProbe
         var captured = new HashSet<string>();
         string stage = "startup";
         int snapshot = 0;
+        bool transformOnly = System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_TRANSFORM_ONLY") == "1";
         bool success = false;
         string? failure = null;
         try
         {
             if (RunManager.Instance.IsInProgress) throw new InvalidOperationException("Scene fixtures require a fresh disposable process.");
             await Wait(() => Walk(host.GetTree().Root).OfType<NMainMenu>().Any(n => n.IsNodeReady()), "main_menu");
-            var character = ModelDb.AllCharacters.Single(c => c.Id.Entry == "FOOL");
+            var character = ModelDb.AllCharacters.Single(c => c.Id.Entry == (transformOnly ? "IRONCLAD" : "FOOL"));
             var starting = NGame.Instance!.StartNewSingleplayerRun(Player.CreateForNewRun(character, UnlockState.all, 1UL), false,
                 ActModel.GetDefaultList(), Array.Empty<ModifierModel>(), "AUTOPILOTSCENES20261114", GameMode.Standard, false, 0);
             await Wait(() => NRun.Instance != null && RunManager.Instance.IsInProgress, "native_run");
@@ -52,6 +53,14 @@ public static class SceneProbe
             Assert("starting_event_and_native_map", observed.Contains("NEventRoom") && observed.Contains("NMapScreen"), new { scenes = observed.ToArray() });
             var run = RunManager.Instance.DebugOnlyGetState()!;
             Player player = LocalContext.GetMe(run)!;
+            if (transformOnly)
+            {
+                await Enter(RoomType.Shop, "transform_fixture_room");
+                await VerifyTransform(player, 1);
+                await VerifyTransform(player, 2);
+                await VerifyTransform(player, 1, true);
+                success = true; stage = "transform_completed"; return;
+            }
             player.Gold = 2000;
             Write("fixture-setup.json", new { shouldSave = false, nativeFixtures = true, scripted = true, providerApiCalls = 0, playerGold = 2000, injectedStatePurpose = "exercise merchant purchase and deletion deterministically" });
 
@@ -196,7 +205,7 @@ public static class SceneProbe
         {
             Write("result.json", new { success, stage, failure, assertions, scenes = observed.ToArray(), actions = executed.Count, snapshots = snapshot,
                 elapsedSeconds = timer.Elapsed.TotalSeconds, shouldSave = false, scripted = true, providerApiCalls = 0,
-                scope = "Native disposable Fool run: initial event/map, merchant card purchase/removal, rest upgrade/confirm, gold/card reward, chest and first CrystalSphere cell. Scripted fixture setup is separate from player gameplay and model decisions." });
+                scope = transformOnly ? "Native disposable Ironclad fixture: fixed single/multiple and partial-range transformation selections, foreground confirmation, preview stability and native completion." : "Native disposable Fool run: initial event/map, merchant card purchase/removal, rest upgrade/confirm, gold/card reward, chest and first CrystalSphere cell. Scripted fixture setup is separate from player gameplay and model decisions." });
             GD.Print($"[SpireAutopilot/SceneProbe] DONE success={success} assertions={assertions.Count}");
             host.GetTree().Quit(success ? 0 : 1);
         }
@@ -274,6 +283,42 @@ public static class SceneProbe
             }
             await Wait(done, name + "_effect");
         }
+        async Task VerifyTransform(Player player, int count, bool partial = false)
+        {
+            string caseId = partial ? "partial" : count.ToString();
+            stage = "transform_" + caseId;
+            var originals = player.Deck.Cards.ToArray();
+            var prefs = partial
+                ? new CardSelectorPrefs(CardSelectorPrefs.TransformSelectionPrompt, 1, 2) { RequireManualConfirmation = true }
+                : new CardSelectorPrefs(CardSelectorPrefs.TransformSelectionPrompt, count) { RequireManualConfirmation = true };
+            var task = CardSelectCmd.FromDeckForTransformation(player, prefs);
+            for (int selectedCount = 0; selectedCount < count; selectedCount++)
+            {
+                var choices = await Frame(f => f.Scene == "NDeckTransformSelectScreen" && f.Actions.Any(a => a.Kind == "select_card"));
+                var candidate = choices.Actions.First(a => a.Kind == "select_card" && !Details(a).GetProperty("selected").GetBoolean());
+                await Execute(choices, candidate);
+            }
+            if (partial)
+            {
+                var selection = await Frame(f => f.Scene == "NDeckTransformSelectScreen" && f.Actions.Any(a => a.Kind == "confirm"));
+                await Execute(selection, selection.Actions.Single(a => a.Kind == "confirm"));
+            }
+            var preview = await Frame(f => f.Scene == "NDeckTransformSelectScreen" && DetailsContext(f).GetProperty("preview").GetBoolean());
+            Assert("transform_" + caseId + "_one_foreground_confirm", preview.Actions.Count(a => a.Kind == "confirm") == 1
+                && preview.Actions.All(a => a.Kind is "confirm" or "cancel_selection"), preview.Actions);
+            string token = preview.Token;
+            double previewUntil = timer.Elapsed.TotalSeconds + 2;
+            while (timer.Elapsed.TotalSeconds < previewUntil) await Next();
+            var settled = game.Capture() ?? throw new InvalidOperationException("Transform preview disappeared");
+            if (settled.Token != token) Write("transform-token-difference-" + count + ".json", new { before = preview, after = settled });
+            Assert("transform_" + caseId + "_stable_preview", settled.Token == token, new { before = token, after = settled.Token });
+            await Execute(settled, settled.Actions.Single(a => a.Kind == "confirm"));
+            await Complete(task, "transform_" + caseId + "_complete");
+            var chosen = await task;
+            Assert("transform_" + caseId + "_native_completion", chosen.Count() == count, new { selected = chosen.Select(c => c.Id.ToString()).ToArray() });
+        }
+        JsonElement DetailsContext(DecisionFrame f) => JsonSerializer.SerializeToElement(f.State).GetProperty("context");
+
         async Task SelectAndConfirm(string name, Func<bool> effect)
         {
             stage = name;
