@@ -21,7 +21,7 @@ public static class SessionEfficiencyProgram
             foreach (var (path, raw) in frames)
             {
                 route.Observe(raw, "survival");
-                var prepared = context.Prepare(raw, route, Array.Empty<string>());
+                var prepared = context.Prepare(raw, route);
                 var state = SessionFixture.Node(prepared.State);
                 var full = SessionFixture.Node(prepared.FullState);
                 reconstructed = SessionFixture.Apply(reconstructed, state);
@@ -48,8 +48,8 @@ public static class SessionEfficiencyProgram
 
             var sample = frames.Last().Frame;
             var retryContext = new DecisionContext(); var retryRoute = new RoutePlanner(); retryRoute.Observe(sample, "survival");
-            var firstAttempt = retryContext.Prepare(sample, retryRoute, Array.Empty<string>());
-            var secondAttempt = retryContext.Prepare(sample, retryRoute, Array.Empty<string>());
+            var firstAttempt = retryContext.Prepare(sample, retryRoute);
+            var secondAttempt = retryContext.Prepare(sample, retryRoute);
             Check(JsonNode.DeepEquals(SessionFixture.Node(firstAttempt.State), SessionFixture.Node(secondAttempt.State)), "uncommitted_retry_preserves_snapshot");
 
             var appendedState = SessionFixture.Node(sample.State);
@@ -58,7 +58,7 @@ public static class SessionEfficiencyProgram
             newCard["id"] = "CARD.SESSION_TEST_APPEND"; newCard["name"] = "Test append";
             deck.Add(newCard);
             route.Observe(sample with { State = appendedState }, "survival");
-            var appended = context.Prepare(sample with { State = appendedState }, route, Array.Empty<string>());
+            var appended = context.Prepare(sample with { State = appendedState }, route);
             var appendedDictionary = SessionFixture.Node(appended.FullStableContext)["cardDictionary"]!.AsArray();
             Check(appendedDictionary.Count == previousDictionary!.Count + 1 && previousDictionary.Select((d, i) => JsonNode.DeepEquals(d, appendedDictionary[i])).All(v => v), "new_card_preserves_existing_dictionary_prefix");
             context.Commit(appended);
@@ -67,7 +67,7 @@ public static class SessionEfficiencyProgram
             newRun["player"]!["deck"] = new JsonArray(newCard.DeepClone());
             var nextRaw = sample with { State = newRun };
             route.Observe(nextRaw, "survival");
-            var next = context.Prepare(nextRaw, route, Array.Empty<string>());
+            var next = context.Prepare(nextRaw, route);
             var nextState = SessionFixture.Node(next.State); var nextDict = SessionFixture.Node(next.FullStableContext)["cardDictionary"]!.AsArray();
             Check(nextState["updateType"]!.ToString() == "snapshot", "new_run_rebases_full_snapshot");
             Check(nextDict.Count == 1 && nextDict[0]!["definition"]!["id"]!.ToString() == "CARD.SESSION_TEST_APPEND", "new_run_resets_dictionary");
@@ -83,8 +83,36 @@ public static class SessionEfficiencyProgram
             Check(LocalDecisionPolicy.Choose(new DecisionFrame("test", "NFixture", new { }, new[] { new LegalAction("a", "a", "continue"), new LegalAction("b", "b", "continue") })) == null, "multiple_continue_stays_model");
             Check(LocalDecisionPolicy.Choose(new DecisionFrame("test", "NRewardsScreen", new { }, new[] { new LegalAction("gold", "31 gold", "reward", new { type = "GoldReward", amount = 31 }), new LegalAction("card", "Card", "reward", new { type = "CardReward" }) }))?.Id == "gold", "gold_reward_safe_mechanical_action");
             Check(LocalDecisionPolicy.Choose(new DecisionFrame("test", "NRewardsScreen", new { }, new[] { new LegalAction("card", "Card", "reward", new { type = "CardReward" }) })) == null, "single_card_reward_stays_model");
+            var boardContext = new DecisionContext(); var boardRoute = new RoutePlanner();
+            var board = new { runKey = "board-fixture", cells = Enumerable.Range(0, 64).Select(i => new { row = i / 8, column = i % 8, revealed = false, clue = (int?)null }).ToArray() };
+            var boardFrame = new DecisionFrame("b1", "SyntheticBoard", board, new[] { new LegalAction("cell:5", "Reveal", "event") });
+            var initialBoard = boardContext.Prepare(boardFrame, boardRoute); boardContext.Commit(initialBoard);
+            var revealedBoard = SessionFixture.Node(board); revealedBoard["cells"]![5]!["revealed"] = true; revealedBoard["cells"]![5]!["clue"] = 2;
+            var changedBoard = boardContext.Prepare(boardFrame with { State = revealedBoard }, boardRoute);
+            Check(JsonNode.DeepEquals(SessionFixture.Apply(SessionFixture.Node(initialBoard.FullState)["game"], SessionFixture.Node(changedBoard.State)), SessionFixture.Node(changedBoard.FullState)["game"]), "sparse_array_patch_reconstructs_board");
+            Check(SessionFixture.Bytes(changedBoard.State) < SessionFixture.Bytes(changedBoard.FullState!) / 3, "sparse_reveal_uses_indexed_patch");
+            var prefixContext = new DecisionContext(); var prefixRoute = new RoutePlanner(); var prefixSession = new AgentSession();
+            var prefixIdentity = new AgentSession.SessionIdentity("fixture", "fixture", "survival", "Responses", null, "", "native", null, false);
+            AgentSession.SessionRequest NativeRequest(DecisionFrame raw)
+            {
+                prefixRoute.Observe(raw, "survival"); var prepared = prefixContext.Prepare(raw, prefixRoute);
+                string stable = JsonSerializer.Serialize(new { strategy = "survival", stableContext = prepared.FullStableContext });
+                string changing = JsonSerializer.Serialize(new { prepared.Scene, state = prepared.FullState, prepared.Actions });
+                return prefixSession.Prepare(prefixIdentity, true, false, stable, stable, changing, changing, 1, 102400, 2.5, true);
+            }
+            var prefixFirst = NativeRequest(frames[0].Frame); prefixSession.Commit(prefixFirst, Array.Empty<JsonNode>(), null);
+            var prefixSecond = NativeRequest(frames[1].Frame);
+            string initialMessage = prefixFirst.Input[0].ToJsonString();
+            string legacyRebaseMessage = new JsonObject { ["role"] = "user", ["content"] = prefixSecond.Stable }.ToJsonString();
+            int PrefixBytes(string left, string right)
+            {
+                byte[] a = Encoding.UTF8.GetBytes(left), b = Encoding.UTF8.GetBytes(right); int i = 0;
+                while (i < Math.Min(a.Length, b.Length) && a[i] == b[i]) i++; return i;
+            }
+            var rebasePrefix = new { priorPrefixBytes = PrefixBytes(initialMessage, legacyRebaseMessage), optimizedPrefixBytes = PrefixBytes(initialMessage, prefixSecond.Input[0].ToJsonString()), optimizedInputBytes = prefixSecond.Info.InputBytes, scope = "Real native first two frames forced to rebase; exact common message bytes, provider cache behavior measured separately." };
+            Check(rebasePrefix.optimizedPrefixBytes > rebasePrefix.priorPrefixBytes, "native_rebase_retains_larger_identical_prefix");
             success = true;
-            Write(new { success, providerApiCalls = 0, checks, frames = ledger, aggregate = new { fullBytes, deltaBytes, bytesSaved = fullBytes - deltaBytes }, scope = "Real native six-state replay. Baseline repeats full state and stable context; delta counts changing payload plus the entire stable context whenever introduced or changed. These count new semantic payload bytes, excluding repeated session history, HTTP wrappers and assistant output; they are not provider token/cache measurements." });
+            Write(new { success, providerApiCalls = 0, checks, rebasePrefix, frames = ledger, aggregate = new { fullBytes, deltaBytes, bytesSaved = fullBytes - deltaBytes }, scope = "Real native six-state replay. Baseline repeats full state and stable context; delta counts changing payload plus the entire stable context whenever introduced or changed. These count new semantic payload bytes, excluding repeated session history, HTTP wrappers and assistant output; they are not provider token/cache measurements." });
         }
         catch (Exception ex) { Write(new { success, providerApiCalls = 0, checks, error = ex.ToString() }); }
         return success ? 0 : 1;
@@ -120,8 +148,13 @@ public static class SessionFixture
             if (path.Length == 0) { result = patch["value"]!.DeepClone(); continue; }
             string[] parts = path.Split('/').Skip(1).Select(p => p.Replace("~1", "/", StringComparison.Ordinal).Replace("~0", "~", StringComparison.Ordinal)).ToArray();
             JsonNode parent = result;
-            foreach (var part in parts.SkipLast(1)) parent = parent[part] ?? throw new InvalidDataException("Patch parent missing: " + path);
-            if (parent is not JsonObject obj) throw new InvalidDataException("Leaf patches must target object properties; arrays are whole replacements.");
+            foreach (var part in parts.SkipLast(1)) parent = (parent is JsonArray array ? array[int.Parse(part)] : parent[part]) ?? throw new InvalidDataException("Patch parent missing: " + path);
+            if (parent is JsonArray targetArray)
+            {
+                if (op != "replace") throw new InvalidDataException("Array index updates replace existing elements.");
+                targetArray[int.Parse(parts[^1])] = patch["value"]?.DeepClone(); continue;
+            }
+            if (parent is not JsonObject obj) throw new InvalidDataException("Patch parent must be an object or array.");
             if (op == "remove") obj.Remove(parts[^1]);
             else if (op == "replace") obj[parts[^1]] = patch["value"]?.DeepClone();
             else throw new InvalidDataException("Unsupported patch operation: " + op);

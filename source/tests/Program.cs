@@ -584,6 +584,33 @@ await Test("map route supports candidate coordinate arrays and object spellings 
     foreach (string invalid in new[] { "[[1]]", "[[1,2,3]]", "[[1.5,2]]", "[[\"1\",2]]", "[null]", "[{\"row\":1}]" })
         await Throws<ModelProtocolException>(() => Task.FromResult(ProviderClient.ParseDecision("{\"actionId\":\"map:1\",\"routePlan\":" + invalid + "}", Frame().Actions)));
 });
+await Test("rebase preserves cached stable prefix and cumulative card definitions with rollback", async () =>
+{
+    foreach (string protocol in new[] { "ChatCompletions", "Responses" })
+    {
+        var session = new AgentSession();
+        var identity = new AgentSession.SessionIdentity("https://fixture.invalid", "fixture", "survival", protocol, null, "", "run", null, false);
+        string Stable(int cards) => JsonSerializer.Serialize(new { stableContext = new { actMap = new string('m', 2400), cardDictionary = Enumerable.Range(1, cards).Select(i => new { cardRef = "c" + i }).ToArray() } });
+        AgentSession.SessionRequest Prepare(int cards) => session.Prepare(identity, protocol == "Responses", false, Stable(cards), Stable(cards), "{\"state\":1}", "{\"state\":1}", 1, 100000, 2.5, true);
+        var first = Prepare(1); session.Commit(first, Array.Empty<System.Text.Json.Nodes.JsonNode>(), null);
+        var second = Prepare(2);
+        Check(second.Info.RebaseReason == "bounded_history_rebase", "forced rebase");
+        Check(second.Input[0].ToJsonString() == first.Input[0].ToJsonString(), "first stable message byte identical after dictionary expansion");
+        string delta = second.Input[1]["content"]!.ToString();
+        Check(delta.Contains("newCardDefinitions") && delta.Contains("c2") && !delta.Contains("actMap"), "only cumulative new cards sent after anchor");
+        session.Commit(second, Array.Empty<System.Text.Json.Nodes.JsonNode>(), null); session.DiscardLastDecision();
+        Check(Prepare(2).Input[0].ToJsonString() == first.Input[0].ToJsonString(), "rollback retains anchor");
+        session.Reset();
+        Check(Prepare(2).Input[0]["content"]!.ToString() == Stable(2), "new session uses current complete anchor");
+    }
+});
+await Test("latest legal actions are validated across persistent history", async () =>
+{
+    using var http = new HttpClient(new FakeHandler((request, ct) => Task.FromResult(Chat("{\"actionId\":\"map:1\"}"))));
+    using var client = new ProviderClient(http);
+    await client.DecideAsync(Config(), Frame(), CancellationToken.None);
+    await Throws<ModelProtocolException>(() => client.DecideAsync(Config(), Frame() with { Actions = new[] { new LegalAction("new-only", "Current action", "event") } }, CancellationToken.None));
+});
 Console.WriteLine($"RESULT passed={passed} failed={failures.Count}");
 foreach (var failure in failures) Console.WriteLine(failure);
 return failures.Count == 0 ? 0 : 1;

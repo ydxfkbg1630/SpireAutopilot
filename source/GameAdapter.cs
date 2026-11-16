@@ -331,28 +331,79 @@ public sealed partial class GameAdapter
                 Add(button, ButtonText(button, "继续前进"), button.GetType().Name == "NProceedButton" ? "continue" : "skip", null, () => Click(button));
     }
 
+    private string? crystalObservationKey;
+    private ScryAnalysis? crystalAnalysis;
+    private string? crystalToolSwitchKey;
+
     private object CaptureCrystalSphere(Node scene)
     {
         var entity = Member(scene, "_entity");
         bool finished = Member(entity, "IsFinished") is true;
-        var cells = Walk(scene).OfType<NCrystalSphereCell>().Where(LiveVisible).ToArray();
+        int remaining = Member(entity, "DivinationCount") is int count ? count : 0;
+        string current = Text(Member(entity, "CrystalSphereTool"));
+        var cells = Walk(scene).OfType<NCrystalSphereCell>().Where(LiveVisible).OrderBy(c => c.Entity.Y).ThenBy(c => c.Entity.X).ToArray();
+        // Read Item only after its cell is exposed. Never read item.Position or the hidden cells' Item.
+        // Intrinsic icon size distinguishes small/large gold and common/rare potion artwork.
+        var visibleIds = new Dictionary<object, string>(ReferenceEqualityComparer.Instance);
+        var observation = cells.Select(c =>
+        {
+            if (c.Entity.IsHidden) return new ScryCell(c.Entity.X, c.Entity.Y, true, null, null);
+            var item = c.Entity.Item;
+            if (item == null) return new ScryCell(c.Entity.X, c.Entity.Y, false, null, null);
+            if (!visibleIds.TryGetValue(item, out string? id))
+                visibleIds[item] = id = "visible-" + c.Entity.X + "-" + c.Entity.Y;
+            string kind = item.GetType().Name;
+            if (kind == "CrystalSphereGold" && item.Size.X == 2) kind += "Large";
+            if (kind == "CrystalSpherePotion" && item.Size.X == 2) kind += "Rare";
+            return new ScryCell(c.Entity.X, c.Entity.Y, false, id, kind);
+        }).ToArray();
+        string observationKey = scene.GetInstanceId() + ":" + remaining + ":" + JsonSerializer.Serialize(observation);
+        if (crystalAnalysis == null || crystalObservationKey != observationKey)
+        {
+            crystalAnalysis = CrystalSpherePlanner.Analyze(observation,
+                cells.Length == 0 ? 0 : cells.Max(c => c.Entity.X) + 1,
+                cells.Length == 0 ? 0 : cells.Max(c => c.Entity.Y) + 1, remaining);
+            crystalObservationKey = observationKey;
+        }
+        var analysis = crystalAnalysis;
+        var candidates = analysis.candidates.ToDictionary(c => (c.x, c.y, c.tool));
+        var legalCells = cells.Where(c => Enabled(c) && c.Entity.IsHidden).ToArray();
         if (!finished)
         {
-            foreach (var cell in cells.Where(c => Enabled(c) && c.Entity.IsHidden))
-                Add(cell, $"水晶球占卜格子（{cell.Entity.X}, {cell.Entity.Y}）", "scry_cell", new { x = cell.Entity.X, y = cell.Entity.Y }, () => Click(cell));
-            foreach (var tool in Walk(scene).OfType<NClickableControl>().Where(n => Enabled(n) && n.GetType().Name == "NDivinationButton"))
+            foreach (var cell in legalCells)
+            {
+                candidates.TryGetValue((cell.Entity.X, cell.Entity.Y, current), out var evaluation);
+                Add(cell, $"水晶球占卜格子（{cell.Entity.X}, {cell.Entity.Y}）", "scry_cell",
+                    new { x = cell.Entity.X, y = cell.Entity.Y, newCells = evaluation?.newCells }, () => Click(cell));
+            }
+            foreach (var tool in Walk(scene).OfType<NClickableControl>().Where(n => Enabled(n) && n.GetType().Name == "NDivinationButton" && crystalToolSwitchKey != observationKey))
             {
                 bool big = tool.Name.ToString().Contains("Big");
-                string current = Text(Member(entity, "CrystalSphereTool"));
                 if ((big && current == "Big") || (!big && current == "Small")) continue;
-                Add(tool, big ? "切换大范围占卜工具" : "切换单格占卜工具", "scry_tool", null, () => Click(tool));
+                Add(tool, big ? "切换大范围占卜工具" : "切换单格占卜工具", "scry_tool", new { tool = big ? "Big" : "Small", cost = 0 }, () => { Click(tool); crystalToolSwitchKey = observationKey; });
             }
         }
         AddProgressButtons(scene);
+        var legalCoordinates = legalCells.Select(c => (c.Entity.X, c.Entity.Y)).ToHashSet();
+        var best = finished ? null : analysis.candidates.FirstOrDefault(c => legalCoordinates.Contains((c.x, c.y)) && (c.tool == current || crystalToolSwitchKey != observationKey));
+        string? recommendation = null;
+        if (best != null)
+        {
+            if (best.tool == current)
+                recommendation = "scry_cell:" + legalCells.First(c => c.Entity.X == best.x && c.Entity.Y == best.y).GetInstanceId();
+            else
+                recommendation = actions.FirstOrDefault(a => a.Kind == "scry_tool"
+                    && JsonSerializer.SerializeToElement(a.Details).GetProperty("tool").GetString() == best.tool)?.Id;
+        }
         return new
         {
-            text = VisibleTexts(scene), remaining = Member(entity, "DivinationCount"), tool = Text(Member(entity, "CrystalSphereTool")), finished,
-            cells = cells.Select(c => new { x = c.Entity.X, y = c.Entity.Y, hidden = c.Entity.IsHidden, visibleItem = c.Entity.IsHidden ? null : c.Entity.Item?.GetType().Name }).ToArray()
+            text = VisibleTexts(scene), remaining, tool = current, finished,
+            rules = "每次点击消耗 1 次占卜。Big 揭开中心及相邻的 3×3 格；Small 揭开 1 格；切换免费。物品占满固定矩形，全部揭开才领取；诅咒 2×2 全揭开获得疑虑。每次揭开后依据新的局部图案重新选择。候选概率是与已露格兼容的位置均匀估计；未知格保留探索风险。",
+            cells = observation, visibleItems = analysis.items,
+            recommendedActionId = recommendation,
+            recommendationIsCertain = best?.certain == true && recommendation != null,
+            recommendation = best,
+            alternatives = analysis.candidates.Take(8).ToArray()
         };
     }
 

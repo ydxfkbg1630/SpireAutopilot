@@ -11,6 +11,7 @@ public sealed class AgentSession
     private SessionIdentity? identity;
     private readonly List<JsonNode> ledger = new();
     private string? lastStable;
+    private string? stableAnchor;
     private string? responseId;
     private int turns;
     private Snapshot? previous;
@@ -23,7 +24,7 @@ public sealed class AgentSession
         lock (gate)
         {
         string? reason = !persistent ? "independent_frame" : identity == null ? "initial" : identity != next ? "scope_or_configuration_changed" : null;
-        if (reason != null) { identity = next; ledger.Clear(); lastStable = null; responseId = null; turns = 0; previous = null; revision++; }
+        if (reason != null) { identity = next; ledger.Clear(); lastStable = null; stableAnchor = null; responseId = null; turns = 0; previous = null; revision++; }
         var history = ledger.Select(n => n.DeepClone()).ToList();
         var additions = new List<JsonNode>();
         bool rebase = history.Count == 0;
@@ -41,10 +42,22 @@ public sealed class AgentSession
             additions = baseline;
             history = additions.Select(n => n.DeepClone()).ToList();
         }
+        string anchor = stableAnchor ?? fullStable;
+        if (rebase && anchor != fullStable)
+        {
+            var anchored = new List<JsonNode> { Message("user", anchor), Message("user", StableAddition(anchor, fullStable)), Message("user", fullChanging) };
+            // Preserve a previously cached prefix across rebases while respecting the same total budget.
+            if (Bytes(anchored) <= inputLimit)
+            {
+                additions = anchored;
+                history = additions.Select(n => n.DeepClone()).ToList();
+            }
+            else anchor = fullStable;
+        }
         bool usePrevious = serverState && !rebase && responseId != null;
         var sent = usePrevious ? additions : history;
         string mode = !persistent ? "independent_frame" : responses ? serverState ? "responses_server" : "responses_replay" : "chat_replay";
-        return new SessionRequest(revision, history, sent, stable, usePrevious ? responseId : null, rebase ? 0 : turns,
+        return new SessionRequest(revision, history, sent, stable, anchor, usePrevious ? responseId : null, rebase ? 0 : turns,
             new AgentSessionInfo(mode, (rebase ? 0 : turns) + 1, Bytes(sent), reason));
         }
     }
@@ -54,10 +67,10 @@ public sealed class AgentSession
         lock (gate)
         {
         if (request.Revision != revision) return false;
-        previous = new Snapshot(ledger.Select(n => n.DeepClone()).ToArray(), lastStable, responseId, turns);
+        previous = new Snapshot(ledger.Select(n => n.DeepClone()).ToArray(), lastStable, stableAnchor, responseId, turns);
         ledger.Clear(); ledger.AddRange(request.History.Select(n => n.DeepClone()));
         ledger.AddRange(output.Select(n => n.DeepClone()));
-        lastStable = request.Stable; responseId = nextResponseId; turns = request.PreviousTurns + 1;
+        lastStable = request.Stable; stableAnchor = request.Anchor; responseId = nextResponseId; turns = request.PreviousTurns + 1;
         revision++;
         return true;
         }
@@ -69,7 +82,7 @@ public sealed class AgentSession
         {
         if (previous == null) return;
         ledger.Clear(); ledger.AddRange(previous.Ledger.Select(n => n.DeepClone()));
-        lastStable = previous.Stable; responseId = previous.ResponseId; turns = previous.Turns;
+        lastStable = previous.Stable; stableAnchor = previous.Anchor; responseId = previous.ResponseId; turns = previous.Turns;
         previous = null; revision++;
         }
     }
@@ -78,7 +91,7 @@ public sealed class AgentSession
     {
         lock (gate)
         {
-        identity = null; ledger.Clear(); lastStable = null; responseId = null; turns = 0; previous = null; revision++;
+        identity = null; ledger.Clear(); lastStable = null; stableAnchor = null; responseId = null; turns = 0; previous = null; revision++;
         }
     }
 
@@ -105,6 +118,6 @@ public sealed class AgentSession
         return new JsonObject { ["contextUpdate"] = change }.ToJsonString(TextJson);
     }
     internal sealed record SessionIdentity(string Endpoint, string Model, string Strategy, string Protocol, bool? Thinking, string ApiKey, string Scope, double? Temperature, bool JsonMode);
-    internal sealed record SessionRequest(long Revision, IReadOnlyList<JsonNode> History, IReadOnlyList<JsonNode> Input, string Stable, string? PreviousResponseId, int PreviousTurns, AgentSessionInfo Info);
-    private sealed record Snapshot(IReadOnlyList<JsonNode> Ledger, string? Stable, string? ResponseId, int Turns);
+    internal sealed record SessionRequest(long Revision, IReadOnlyList<JsonNode> History, IReadOnlyList<JsonNode> Input, string Stable, string Anchor, string? PreviousResponseId, int PreviousTurns, AgentSessionInfo Info);
+    private sealed record Snapshot(IReadOnlyList<JsonNode> Ledger, string? Stable, string? Anchor, string? ResponseId, int Turns);
 }

@@ -62,19 +62,30 @@ public sealed class DecisionContext
     private static void Diff(JsonNode? before, JsonNode? after, string path, JsonArray patches)
     {
         if (JsonNode.DeepEquals(before, after)) return;
+        var replacement = new JsonObject { ["op"] = "replace", ["path"] = path, ["value"] = after?.DeepClone() };
+        var edits = new JsonArray();
         if (before is JsonObject oldObject && after is JsonObject newObject)
         {
             foreach (string name in oldObject.Select(p => p.Key).Except(newObject.Select(p => p.Key), StringComparer.Ordinal))
-                patches.Add(new JsonObject { ["op"] = "remove", ["path"] = path + "/" + Escape(name) });
+                edits.Add(new JsonObject { ["op"] = "remove", ["path"] = path + "/" + Escape(name) });
             foreach (var pair in newObject)
             {
                 string nextPath = path + "/" + Escape(pair.Key);
-                if (!oldObject.ContainsKey(pair.Key)) patches.Add(new JsonObject { ["op"] = "replace", ["path"] = nextPath, ["value"] = pair.Value?.DeepClone() });
-                else Diff(oldObject[pair.Key], pair.Value, nextPath, patches);
+                if (!oldObject.ContainsKey(pair.Key)) edits.Add(new JsonObject { ["op"] = "replace", ["path"] = nextPath, ["value"] = pair.Value?.DeepClone() });
+                else Diff(oldObject[pair.Key], pair.Value, nextPath, edits);
             }
-            return;
         }
-        patches.Add(new JsonObject { ["op"] = "replace", ["path"] = path, ["value"] = after?.DeepClone() });
+        else if (before is JsonArray oldArray && after is JsonArray newArray && oldArray.Count == newArray.Count)
+        {
+            // Indices remain stable only while lengths match. Insertions/removals replace the array.
+            for (int i = 0; i < newArray.Count; i++)
+                Diff(oldArray[i], newArray[i], path + "/" + i, edits);
+        }
+        // Dense changes cost fewer bytes as one replacement, sparse changes keep only changed leaves.
+        if (edits.Count > 0 && System.Text.Encoding.UTF8.GetByteCount(edits.ToJsonString())
+            < System.Text.Encoding.UTF8.GetByteCount(replacement.ToJsonString()) + 2)
+            foreach (var edit in edits) patches.Add(edit!.DeepClone());
+        else patches.Add(replacement);
     }
     private static string Escape(string name) => name.Replace("~", "~0", StringComparison.Ordinal).Replace("/", "~1", StringComparison.Ordinal);
 

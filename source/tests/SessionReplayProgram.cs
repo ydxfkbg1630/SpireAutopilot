@@ -52,7 +52,7 @@ public static class SessionReplayProgram
                 foreach (var (_, raw) in frames)
                 {
                     route.Observe(raw, config.Strategy);
-                    var frame = context.Prepare(raw, route, Array.Empty<string>());
+                    var frame = context.Prepare(raw, route);
                     prepared.Add(new { raw.Scene, fullStateBytes = SessionFixture.Bytes(frame.FullState!), updateBytes = SessionFixture.Bytes(frame.State), stableBytes = SessionFixture.Bytes(frame.FullStableContext!) });
                     SessionFixture.AcceptFirstRoute(raw, route); context.Commit(frame);
                 }
@@ -69,7 +69,7 @@ public static class SessionReplayProgram
                 {
                     var raw = frames[i].Frame;
                     route.Observe(raw, config.Strategy);
-                    var prepared = context.Prepare(raw, route, Array.Empty<string>());
+                    var prepared = context.Prepare(raw, route);
                     int callsBefore = wire.Calls;
                     var timer = Stopwatch.StartNew();
                     var decision = await provider.DecideAsync(config, prepared, cancel.Token);

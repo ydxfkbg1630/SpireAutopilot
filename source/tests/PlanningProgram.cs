@@ -133,9 +133,18 @@ sealed class ContextHandler : HttpMessageHandler
                 var path = patch!["path"]!.ToString();
                 if (path == "") { game = patch["value"]?.DeepClone(); continue; }
                 var parts = path[1..].Split('/').Select(s => s.Replace("~1", "/").Replace("~0", "~")).ToArray();
-                JsonNode parent = game!; foreach (var name in parts[..^1]) parent = parent[name]!;
-                if (patch["op"]!.ToString() == "remove") parent.AsObject().Remove(parts[^1]);
-                else parent[parts[^1]] = patch["value"]?.DeepClone();
+                JsonNode parent = game!;
+                foreach (var name in parts[..^1])
+                    parent = (parent is JsonArray array ? array[int.Parse(name, System.Globalization.CultureInfo.InvariantCulture)] : parent[name])!;
+                string operation = patch["op"]!.ToString();
+                if (parent is JsonArray target)
+                {
+                    if (operation != "replace") throw new InvalidDataException("Array patches replace existing indices; length changes replace the array.");
+                    target[int.Parse(parts[^1], System.Globalization.CultureInfo.InvariantCulture)] = patch["value"]?.DeepClone();
+                }
+                else if (operation == "remove") parent.AsObject().Remove(parts[^1]);
+                else if (operation == "replace") parent[parts[^1]] = patch["value"]?.DeepClone();
+                else throw new InvalidDataException("Unsupported patch operation: " + operation);
             }
         }
         return (game, stable, actions);

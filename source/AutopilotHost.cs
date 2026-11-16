@@ -452,6 +452,13 @@ public partial class AutopilotHost : Node
     private void RecordUsage(ProviderUsage? usage, bool showCurrent = true)
     {
         totalRequests++;
+        if (usage != null)
+            GD.Print("[SpireAutopilot] MODEL_METRICS " + JsonSerializer.Serialize(new
+            {
+                request = totalRequests, elapsedMs = usage.ElapsedMilliseconds,
+                inputTokens = usage.PromptTokens, cachedTokens = usage.CachedTokens,
+                outputTokens = usage.CompletionTokens, session = usage.Session,
+            }));
         if (usage is { PromptTokens: > 0, CachedTokens: >= 0 })
         {
             countedPromptTokens += usage.PromptTokens.Value;

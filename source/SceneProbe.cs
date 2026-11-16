@@ -37,6 +37,7 @@ public static class SceneProbe
         string stage = "startup";
         int snapshot = 0;
         bool transformOnly = System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_TRANSFORM_ONLY") == "1";
+        bool crystalOnly = System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_CRYSTAL_ONLY") == "1";
         bool success = false;
         string? failure = null;
         try
@@ -53,6 +54,11 @@ public static class SceneProbe
             Assert("starting_event_and_native_map", observed.Contains("NEventRoom") && observed.Contains("NMapScreen"), new { scenes = observed.ToArray() });
             var run = RunManager.Instance.DebugOnlyGetState()!;
             Player player = LocalContext.GetMe(run)!;
+            if (crystalOnly)
+            {
+                await VerifyCrystal(player);
+                success = true; stage = "crystal_completed"; return;
+            }
             if (transformOnly)
             {
                 await Enter(RoomType.Shop, "transform_fixture_room");
@@ -187,16 +193,7 @@ public static class SceneProbe
             Assert("treasure_native_effect", player.Relics.Count > relics || player.Gold > chestGold,
                 new { beforeRelics = relics, afterRelics = player.Relics.Count, beforeGold = chestGold, afterGold = player.Gold });
 
-            await Enter(RoomType.Shop, "crystal_fixture_room");
-            var crystal = new CrystalSphereMinigame(player, new Rng(20261114UL), 3);
-            Task crystalTask = crystal.PlayMinigame();
-            int hidden = crystal.cells.Cast<MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereCell>().Count(c => c.IsHidden);
-            var sphere = await Frame(f => f.Scene == "NCrystalSphereScreen" && f.Actions.Any(a => a.Kind == "scry_cell"));
-            await Execute(sphere, sphere.Actions.First(a => a.Kind == "scry_cell"));
-            await Wait(() => crystal.DivinationCount == 2, "crystal_first_scry");
-            Assert("crystal_scry_native_effect", crystal.DivinationCount == 2 && crystal.cells.Cast<MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereCell>().Count(c => c.IsHidden) < hidden,
-                new { beforeDivinations = 3, afterDivinations = crystal.DivinationCount, beforeHiddenCells = hidden,
-                    afterHiddenCells = crystal.cells.Cast<MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent.CrystalSphereCell>().Count(c => c.IsHidden), pendingTask = crystalTask.Status.ToString() });
+            await VerifyCrystal(player);
             success = true;
             stage = "completed";
         }
@@ -205,7 +202,7 @@ public static class SceneProbe
         {
             Write("result.json", new { success, stage, failure, assertions, scenes = observed.ToArray(), actions = executed.Count, snapshots = snapshot,
                 elapsedSeconds = timer.Elapsed.TotalSeconds, shouldSave = false, scripted = true, providerApiCalls = 0,
-                scope = transformOnly ? "Native disposable Ironclad fixture: fixed single/multiple and partial-range transformation selections, foreground confirmation, preview stability and native completion." : "Native disposable Fool run: initial event/map, merchant card purchase/removal, rest upgrade/confirm, gold/card reward, chest and first CrystalSphere cell. Scripted fixture setup is separate from player gameplay and model decisions." });
+                scope = crystalOnly ? "Native disposable CrystalSphere: three sequential native clicks, observed fragments, compatibility inference, hidden-cell redaction and stale-action rejection." : transformOnly ? "Native disposable Ironclad fixture: fixed single/multiple and partial-range transformation selections, foreground confirmation, preview stability and native completion." : "Native disposable Fool run: initial event/map, merchant card purchase/removal, rest upgrade/confirm, gold/card reward, chest and first CrystalSphere cell. Scripted fixture setup is separate from player gameplay and model decisions." });
             GD.Print($"[SpireAutopilot/SceneProbe] DONE success={success} assertions={assertions.Count}");
             host.GetTree().Quit(success ? 0 : 1);
         }
@@ -215,6 +212,61 @@ public static class SceneProbe
         {
             assertions.Add(new { name, passed, evidence }); Write("assertions.json", assertions);
             if (!passed) throw new InvalidOperationException("Native fixture assertion: " + name);
+        }
+        async Task VerifyCrystal(Player player)
+        {
+            await Enter(RoomType.Shop, "crystal_fixture_room");
+            var crystal = new CrystalSphereMinigame(player, new Rng(20261114UL), 6);
+            Task crystalTask = crystal.PlayMinigame();
+            for (int step = 0; step < 3; step++)
+            {
+                var frame = await Frame(f => f.Scene == "NCrystalSphereScreen" && f.Actions.Any(a => a.Kind == "scry_cell"));
+                JsonElement Context(DecisionFrame f) => JsonSerializer.SerializeToElement(f.State).GetProperty("context");
+                var context = Context(frame);
+                Assert($"crystal_hidden_redaction_{step}", context.GetProperty("cells").EnumerateArray()
+                    .Where(c => c.GetProperty("hidden").GetBoolean())
+                    .All(c => c.GetProperty("itemId").ValueKind == JsonValueKind.Null && c.GetProperty("visibleItem").ValueKind == JsonValueKind.Null), new { step });
+                Assert($"crystal_full_grid_{step}", context.GetProperty("cells").GetArrayLength() == 121, new { cells = context.GetProperty("cells").GetArrayLength() });
+                string recommended = context.GetProperty("recommendedActionId").GetString()!;
+                var action = frame.Actions.Single(a => a.Id == recommended);
+                if (action.Kind == "scry_tool")
+                {
+                    int beforeTool = crystal.DivinationCount;
+                    await Execute(frame, action);
+                    frame = await Frame(f => f.Scene == "NCrystalSphereScreen"); context = Context(frame);
+                    Assert($"crystal_free_tool_{step}", crystal.DivinationCount == beforeTool, new { beforeTool, after = crystal.DivinationCount });
+                    action = frame.Actions.Single(a => a.Id == context.GetProperty("recommendedActionId").GetString());
+                }
+                int before = crystal.DivinationCount;
+                int hidden = crystal.cells.Cast<CrystalSphereCell>().Count(c => c.IsHidden);
+                int expected = Details(action).GetProperty("newCells").GetInt32();
+                await Execute(frame, action);
+                await Wait(() => crystal.DivinationCount == before - 1, "crystal_scry_" + step);
+                var after = await Frame(f => f.Scene == "NCrystalSphereScreen" && f.Token != frame.Token);
+                int afterHidden = crystal.cells.Cast<CrystalSphereCell>().Count(c => c.IsHidden);
+                Assert($"crystal_native_coverage_{step}", hidden-afterHidden == expected, new { before, after = crystal.DivinationCount, expected, actual = hidden-afterHidden });
+                bool rejected = false;
+                try { await game.ExecuteAsync(frame.Token, action.Id); } catch (InvalidOperationException) { rejected = true; }
+                Assert($"crystal_fresh_observation_{step}", rejected && Context(after).GetProperty("cells").EnumerateArray().Count(c => !c.GetProperty("hidden").GetBoolean()) > context.GetProperty("cells").EnumerateArray().Count(c => !c.GetProperty("hidden").GetBoolean()), new { rejected });
+                var visible = Context(after).GetProperty("visibleItems");
+                if (step == 2)
+                {
+                    string[] priorPartial = context.GetProperty("visibleItems").EnumerateArray().Where(i => !i.GetProperty("completed").GetBoolean()).Select(i => i.GetProperty("kind").GetString()!).ToArray();
+                    Assert("crystal_partial_guides_next_click", priorPartial.Length > 0 && priorPartial.All(kind => visible.EnumerateArray().Any(i => i.GetProperty("kind").GetString() == kind && i.GetProperty("completed").GetBoolean())), new { priorPartial, afterItems = visible });
+                }
+                Assert($"crystal_partial_item_inference_{step}", visible.GetArrayLength() > 0 && visible.EnumerateArray().All(i => i.GetProperty("compatiblePlacements").GetInt32() > 0), visible);
+            }
+            var switchFrame = await Frame(f => f.Scene == "NCrystalSphereScreen");
+            int beforeSwitch = crystal.DivinationCount;
+            await Execute(switchFrame, switchFrame.Actions.Single(a => a.Kind == "scry_tool"));
+            var smallFrame = await Frame(f => f.Scene == "NCrystalSphereScreen");
+            Assert("crystal_tool_switch_progress_guard", crystal.DivinationCount == beforeSwitch && smallFrame.Actions.All(a => a.Kind != "scry_tool"), new { beforeSwitch, after = crystal.DivinationCount });
+            var smallContext = JsonSerializer.SerializeToElement(smallFrame.State).GetProperty("context");
+            var safe = smallFrame.Actions.Single(a => a.Id == smallContext.GetProperty("recommendedActionId").GetString());
+            Assert("crystal_small_recommendation", safe.Kind == "scry_cell" && Details(safe).GetProperty("newCells").GetInt32() == 1, Details(safe));
+            await Execute(smallFrame, safe);
+            var progressed = await Frame(f => f.Scene == "NCrystalSphereScreen" && f.Token != smallFrame.Token);
+            Assert("crystal_switch_then_cell_native", crystal.DivinationCount == beforeSwitch - 1 && progressed.Actions.Any(a => a.Kind == "scry_tool"), new { beforeSwitch, after = crystal.DivinationCount });
         }
         async Task Next()
         {
