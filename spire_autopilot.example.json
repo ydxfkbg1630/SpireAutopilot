@@ -10,6 +10,7 @@
   "Strategy": "优先生存并完成整局，根据牌组、生命、遗物、金币和后续地图规划；优先选择有效配合，合理休息升级与删牌。",
   "RequestTimeoutSeconds": 90,
   "DecisionDelaySeconds": 1,
+  "CardChoicePreviewSeconds": 3,
   "AutoCombat": true,
   "SolverWorkerLimit": 0,
   "SolverMaxSpeed": true,

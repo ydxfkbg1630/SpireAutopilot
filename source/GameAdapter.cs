@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Godot;
@@ -204,15 +204,21 @@ public sealed partial class GameAdapter
 
     public Task ExecuteAsync(string token, string actionId)
     {
-        var fresh = Capture();
-        if (fresh == null || !StringComparer.Ordinal.Equals(token, fresh.Token))
+        if (!TryExecuteCurrent(token, actionId))
             throw new InvalidOperationException("游戏状态已更新，请使用新场景重新决策。");
+        return Task.CompletedTask;
+    }
+
+    internal bool TryExecuteCurrent(string token, string actionId)
+    {
+        var fresh = Capture();
+        if (fresh == null || !StringComparer.Ordinal.Equals(token, fresh.Token)) return false;
         if (!dispatch.TryGetValue(actionId, out var execute))
             throw new InvalidOperationException("动作需要来自当前场景的合法动作列表。");
         // A native purchase/event may await another card-selection screen. Dispatch without awaiting that nested choice.
         execute();
         Status = "已提交原生动作：" + actionId;
-        return Task.CompletedTask;
+        return true;
     }
 
     private object CaptureMap(NMapScreen screen)
@@ -308,7 +314,7 @@ public sealed partial class GameAdapter
         {
             string type = button.GetType().Name;
             if (type is "NConfirmButton" or "NChoiceSelectionSkipButton" or "NCardRewardAlternativeButton")
-                Add(button, type == "NConfirmButton" ? (preview ? "确认当前选牌结果" : "确认已选卡牌") : ButtonText(button, "跳过或选择替代奖励"), type == "NConfirmButton" ? "confirm" : "alternative", new { text = VisibleTexts(button), alternative = SnapshotModel(Member(button, "_alternative")) }, () => Click(button));
+                Add(button, type == "NConfirmButton" ? (preview ? "确认当前选牌结果" : "确认已选卡牌") : ButtonText(button, type == "NChoiceSelectionSkipButton" ? "跳过选牌" : "选择替代奖励"), type == "NConfirmButton" ? "confirm" : "alternative", new { text = VisibleTexts(button), alternative = SnapshotModel(Member(button, "_alternative")) }, () => Click(button));
             else if (type == "NBackButton")
                 Add(button, preview ? "返回选牌" : "取消本次选牌", "cancel_selection", null, () => Click(button));
         }

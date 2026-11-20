@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -21,6 +21,7 @@ public sealed class AutopilotConfig
     public string Strategy { get; set; } = "优先生存并完成整局，根据当前牌组、生命、遗物与地图规划路线。";
     public int RequestTimeoutSeconds { get; set; } = 45;
     public double DecisionDelaySeconds { get; set; } = 1;
+    public double CardChoicePreviewSeconds { get; set; } = 3;
     public bool AutoCombat { get; set; } = true;
     public bool ReflectAfterRun { get; set; } = true;
     public bool UseRunExperience { get; set; } = true;

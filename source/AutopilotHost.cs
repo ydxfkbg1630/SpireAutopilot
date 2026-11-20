@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Nodes;
 using Godot;
 
@@ -404,11 +404,28 @@ public partial class AutopilotHost : Node
             { provider.DiscardLastDecision(); Record("场景已更新，重新读取局面。"); nextPoll = clock + .5; return; }
             route.Accept(frame, decision);
             modelThinking = false;
-            panel.SetCurrentDetails(Redact(decision.ReasoningSummary is { Length: > 0 } summary ? summary : decision.Reason));
+            LegalAction action = fresh.Actions.Single(item => item.Id == decision.ActionId);
+            bool previewed = await PreviewCardChoiceAsync(frame.Token, action, decision.Reason, cts.Token);
+            cts.Token.ThrowIfCancellationRequested();
+            if (!enabled || exiting || requestGeneration != generation) { provider.DiscardLastDecision(); return; }
+            if (!game.TryExecuteCurrent(frame.Token, action.Id))
+            {
+                provider.DiscardLastDecision();
+                BeginCurrent("领航", "读取当前局面", "refresh:" + frame.Token);
+                nextPoll = clock + .3;
+                return;
+            }
+            if (previewed)
+            {
+                panel.SetMonitorState("已执行选牌");
+                panel.SetCurrentMetrics("");
+            }
+            else
+            {
+                panel.SetCurrentDetails(Redact(decision.ReasoningSummary is { Length: > 0 } summary ? summary : decision.Reason));
+            }
             SetCurrentUsage(decision.Usage);
-            LegalAction action = frame.Actions.Single(item => item.Id == decision.ActionId);
             Record($"{frame.Scene} → {action.Label}；{decision.Reason}");
-            await game.ExecuteAsync(frame.Token, decision.ActionId);
             decisionContext.Commit(requestFrame);
             awaitingModel = false;
             runExperience.RecordDecision(frame.Scene, action.Label, decision.Reason);
@@ -439,6 +456,29 @@ public partial class AutopilotHost : Node
             if (!exiting && requestGeneration == generation) Pause("领航暂停：" + ex.Message);
         }
         finally { modelThinking = false; pending = null; busy = false; }
+    }
+
+    internal async Task<bool> PreviewCardChoiceAsync(string token, LegalAction action, string reason, CancellationToken cancellation)
+    {
+        if (action.Kind is not ("select_card" or "select_bundle" or "alternative")) return false;
+        double seconds = Math.Clamp(config.CardChoicePreviewSeconds, 0, 10);
+        if (seconds <= 0) return false;
+
+        BeginCurrent("模型", "选牌预览", "card-preview:" + token);
+        string headline = Redact(action.Label);
+        string note = string.Join(" ", Redact(reason).Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
+        if (note.Length > 72) note = note[..72] + "…";
+        panel.SetCurrentDetails(note.Length == 0 ? headline : headline + "\n" + note);
+        var tree = GetTree();
+        ulong started = Time.GetTicksMsec();
+        while (true)
+        {
+            cancellation.ThrowIfCancellationRequested();
+            double remaining = seconds - (Time.GetTicksMsec() - started) / 1000d;
+            if (remaining <= 0) return true;
+            panel.SetCurrentMetrics($"{Math.Ceiling(remaining * 10) / 10:F1} 秒后执行  ·  F9 暂停");
+            await ToSignal(tree.CreateTimer(Math.Min(.1, remaining), ignoreTimeScale: true), SceneTreeTimer.SignalName.Timeout);
+        }
     }
     private static string ModelFailureStage(Exception error) => error switch
     {
