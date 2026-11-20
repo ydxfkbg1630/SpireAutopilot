@@ -18,17 +18,22 @@ internal static class SolverLightweightDiagnostics
         ownsCombat = isOwnedCombat;
         const BindingFlags members = BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic;
         var diagnostics = solver.GetType("CombatSolver.SolverDiagnostics", true)!;
-        var describe = diagnostics.GetMethod("DescribeResult", members)
-            ?? throw new MissingMethodException(diagnostics.FullName, "DescribeResult");
-        var result = describe.GetParameters().Single().ParameterType;
+        var result = solver.GetType("CombatSolver.SolverResult", true)!;
+        var descriptions = diagnostics.GetMethods(members)
+            .Where(m => m.Name == "DescribeResult" && m.ReturnType == typeof(string)
+                && m.GetParameters().FirstOrDefault()?.ParameterType == result).ToArray();
+        if (descriptions.Length == 0) throw new MissingMethodException(diagnostics.FullName, "DescribeResult");
         foreach (string name in new[] { "StartTurnNumber", "DeathTurn", "ProjectedBattleHpLost", "CombatEndedTurn", "WasReused" })
             ResultProperties[name] = result.GetProperty(name, BindingFlags.Instance | BindingFlags.Public)
                 ?? throw new MissingMemberException(result.FullName, name);
-        patcher.Patch(describe, prefix: new HarmonyMethod(typeof(SolverLightweightDiagnostics), nameof(DescribePrefix)));
+        foreach (var describe in descriptions)
+            patcher.Patch(describe, prefix: new HarmonyMethod(typeof(SolverLightweightDiagnostics), nameof(DescribePrefix)));
         var exporter = solver.GetType("CombatSolver.CombatBugReportExporter", true)!;
-        var checkpoint = exporter.GetMethod("RecordCheckpoint", members)
-            ?? throw new MissingMethodException(exporter.FullName, "RecordCheckpoint");
-        patcher.Patch(checkpoint, prefix: new HarmonyMethod(typeof(SolverLightweightDiagnostics), nameof(CheckpointPrefix)));
+        var checkpoints = exporter.GetMethods(members).Where(m => m.Name == "RecordCheckpoint"
+            && m.GetParameters().Any(p => p.Name == "label" && p.ParameterType == typeof(string))).ToArray();
+        if (checkpoints.Length == 0) throw new MissingMethodException(exporter.FullName, "RecordCheckpoint");
+        foreach (var checkpoint in checkpoints)
+            patcher.Patch(checkpoint, prefix: new HarmonyMethod(typeof(SolverLightweightDiagnostics), nameof(CheckpointPrefix)));
     }
 
     private static bool IsLightweight()

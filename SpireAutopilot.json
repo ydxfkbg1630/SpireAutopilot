@@ -3,7 +3,7 @@
   "name": "尖塔全程领航",
   "author": "ydxfkbg1630",
   "description": "自动战斗与局外模型决策，每局更新统一经验总结。",
-  "version": "0.5.11",
+  "version": "0.5.12",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": true,

@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Text.Json;
 using Godot;
 using HarmonyLib;
@@ -157,9 +158,24 @@ public static class SolverPresentation
             ?? throw new MissingMemberException(snapshot.FullName, "SearchMaxDegreeOfParallelism");
         if (snapshotWorkers.PropertyType != typeof(int) || snapshotWorkers.SetMethod == null)
             throw new InvalidOperationException("CombatSolver settings snapshot worker field requires an integer initializer.");
-        var postfix = typeof(SolverPresentation).GetMethod(nameof(ActualWorkerSnapshotPostfix), BindingFlags.Static | BindingFlags.NonPublic)!
+        Patcher.Patch(capture, postfix: new HarmonyMethod(typeof(SolverPresentation), nameof(CreateWorkerSnapshotPostfix)));
+    }
+
+    // Harmony reloads patch methods by metadata token, which loses a generic
+    // method's closed arguments. A factory recreates the concrete signature.
+    private static MethodInfo CreateWorkerSnapshotPostfix(MethodBase original)
+    {
+        var snapshot = ((MethodInfo)original).ReturnType;
+        var postfix = new DynamicMethod("AutopilotWorkerSnapshotPostfix", typeof(void),
+            new[] { snapshot.MakeByRefType() }, typeof(SolverPresentation), skipVisibility: true);
+        postfix.DefineParameter(1, ParameterAttributes.None, "__result");
+        var handler = typeof(SolverPresentation).GetMethod(nameof(ActualWorkerSnapshotPostfix), Members)!
             .MakeGenericMethod(snapshot);
-        Patcher.Patch(capture, postfix: new HarmonyMethod(postfix));
+        var il = postfix.GetILGenerator();
+        il.Emit(OpCodes.Ldarg_0);
+        il.Emit(OpCodes.Call, handler);
+        il.Emit(OpCodes.Ret);
+        return postfix;
     }
 
     private static void WorkerSnapshotPostfix<T>(ref T __result) where T : class
