@@ -113,6 +113,11 @@ public sealed class CombatBridge
             Status = "请在战斗求解器设置中启用求解器";
             return false;
         }
+        if (AutoAnthonyIsLoaded() && _controller!.Assembly.GetType("CombatSolver.AutoAnthonyCardMirrors", false) == null)
+        {
+            Status = "AutoAnthony 动态卡牌需要尖塔领航兼容版 CombatSolver 0.51.10。";
+            return false;
+        }
 
         SolverPresentation.Activate(_controller!);
 
@@ -152,6 +157,10 @@ public sealed class CombatBridge
         Status = active ? "求解器接管战斗" : "等待求解器接受战斗";
         return active;
     }
+
+    private static bool AutoAnthonyIsLoaded()
+        => AppDomain.CurrentDomain.GetAssemblies()
+            .Any(assembly => assembly.GetType("AutoAnthony.ChaosCardModel", false) != null);
 
     /// <summary>Releases only full-auto enabled by this bridge, through the solver's own API.</summary>
     public void PauseOwnedAutomation()

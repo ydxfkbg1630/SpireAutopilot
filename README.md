@@ -2,15 +2,15 @@
 
 # 尖塔全程领航 · SpireAutopilot
 
-让《杀戮尖塔 2》的单人爬塔自动进行。CombatSolver 负责战斗，模型负责地图路线、事件、奖励、商店、休息与选牌；每局结束后更新一份持续积累的经验总结。
+让《杀戮尖塔 2》的单人爬塔自动进行。尖塔领航兼容版 CombatSolver 负责战斗，模型负责地图路线、事件、奖励、商店、休息与选牌；每局结束后更新一份持续积累的经验总结。
 
 [订阅创意工坊](https://steamcommunity.com/sharedfiles/filedetails/?id=3839527748) · [下载发布版](https://github.com/ydxfkbg1630/SpireAutopilot/releases) · [更新记录](CHANGELOG.md)
 
 ## 开始使用
 
-当前适配游戏 **v0.113.0**、**CombatSolver 0.51.5** 与 **RitsuLib 0.6.11+**，面向 Windows 单人游戏。
+当前适配游戏 **v0.113.0**、**尖塔领航兼容版 CombatSolver 0.51.10** 与 **RitsuLib 0.6.11+**，面向 Windows 单人游戏。战斗求解器支持 AutoAnthony 0.3.165 的动态生成卡牌。
 
-1. 订阅并启用 CombatSolver、RitsuLib 和本模组。手动安装时，将发布包中的 `SpireAutopilot` 文件夹放入游戏的 `mods/`。
+1. 订阅并启用[尖塔领航兼容版 CombatSolver](https://steamcommunity.com/sharedfiles/filedetails/?id=3844268417)、RitsuLib 和本模组。手动安装时，将发布包中的 `SpireAutopilot` 文件夹放入游戏的 `mods/`。
 2. 按 **F8** 打开设置，在「模型」页填写接口地址、模型 ID 和 API Key，选择服务支持的协议。
 3. 点击「测试连接」，连接成功后点击「保存设置」。
 4. 开始或继续单人游戏。领航启动时默认开启，可随时按 **F9** 暂停或继续。
