@@ -13,6 +13,7 @@ public sealed class AutopilotConfig
     [JsonIgnore] public string ApiKey { get; set; } = "";
     public string Model { get; set; } = "";
     public string ApiMode { get; set; } = "Responses";
+    public bool UseClaudeCode { get; set; }
     public bool PersistentSession { get; set; } = true;
     public int SessionMaxTurns { get; set; } = 12;
     public int SessionMaxInputBytes { get; set; } = 102400;

@@ -23,6 +23,8 @@ try
 {
     if (!File.Exists(args[0])) throw new InvalidOperationException("配置文件路径对应的文件需要先创建。");
     config = AutopilotConfig.Load(args[0]);
+    var ephemeralKey = Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_LIVE_KEY");
+    if (!string.IsNullOrWhiteSpace(ephemeralKey)) config.ApiKey = ephemeralKey;
     using var provider = new ProviderClient();
     timer.Restart();
     var connection = await provider.TestAsync(config, cancellation.Token);

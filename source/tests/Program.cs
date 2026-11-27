@@ -288,6 +288,33 @@ await Test("HTTP errors redact provider body and perform single POST", async () 
     Check(handler.Calls == 1, "no retry");
 });
 
+await Test("decision accepts a trailing comma but validates the action", async () =>
+{
+    var result = ProviderClient.ParseDecision("{\"actionId\":\"map:2\",\"reason\":\"Choose elite\",}", Frame().Actions);
+    Check(result.ActionId == "map:2", "legal action retained");
+    await Throws<ModelProtocolException>(() => Task.FromResult(
+        ProviderClient.ParseDecision("{\"actionId\":\"stale\",}", Frame().Actions)));
+});
+
+await Test("Responses conversion and billing errors identify configuration issues", async () =>
+{
+    foreach (var row in new[] {
+        (HttpStatusCode.InternalServerError, "convert_request_failed", "Responses"),
+        (HttpStatusCode.Forbidden, "provider_balance", "余额"),
+    })
+    {
+        using var handler = new FakeHandler((_, _) => Task.FromResult(new HttpResponseMessage(row.Item1) {
+            Content = new StringContent(JsonSerializer.Serialize(new {error = new {code = row.Item2, message = "test-secret-456"} }), Encoding.UTF8, "application/json")
+        }));
+        using var http = new HttpClient(handler);
+        using var client = new ProviderClient(http);
+        var config = Config(); config.ApiMode = "Responses";
+        try { await client.DecideAsync(config, Frame(), CancellationToken.None); throw new Exception("Expected configuration error"); }
+        catch (InvalidOperationException ex)
+        { Check(ex is not ProviderTransientException && ex.Message.Contains(row.Item3) && !ex.Message.Contains("test-secret-456"), "fixed safe diagnosis"); }
+    }
+});
+
 await Test("malformed credential yields safe validation error", async () =>
 {
     using var handler = new FakeHandler((_, _) => Task.FromResult(Chat("{}")));

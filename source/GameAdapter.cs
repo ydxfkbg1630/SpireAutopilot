@@ -24,6 +24,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.Map;
 using MegaCrit.Sts2.Core.Nodes.Screens.Overlays;
 using MegaCrit.Sts2.Core.Nodes.Screens.Shops;
 using MegaCrit.Sts2.Core.Nodes.Screens.ScreenContext;
+using MegaCrit.Sts2.Core.Rewards;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace SpireAutopilot;
@@ -131,14 +132,28 @@ public sealed partial class GameAdapter
         }
         else if (scene is NRewardsScreen)
         {
-            foreach (var reward in Walk(scene).OfType<NRewardButton>().Where(Enabled))
+            var rewards = Walk(scene).OfType<NRewardButton>().ToArray();
+            bool potionSlotsFull = !player.HasOpenPotionSlots;
+            bool NeedsPotionSlot(NRewardButton button) => potionSlotsFull && button.Reward is PotionReward;
+            foreach (var reward in rewards.Where(b => Enabled(b) && !NeedsPotionSlot(b)))
             {
                 var local = reward;
                 Add(local, "领取奖励：" + Text(Member(local.Reward, "Description")), "reward", SnapshotReward(local.Reward), () => Click(local));
             }
-            if (Walk(scene).OfType<NRewardButton>().Any(b => b.Reward?.GetType().Name == "PotionReward")) AddPotionDiscardActions(scene, player);
+            if (rewards.Any(b => Enabled(b) && NeedsPotionSlot(b)))
+                AddPotionDiscardActions(scene, player);
             AddProgressButtons(scene);
-            extra = new { rewards = Walk(scene).OfType<NRewardButton>().Select(n => new { node = n.GetInstanceId(), enabled = Enabled(n), reward = SnapshotReward(n.Reward) }).ToArray() };
+            extra = new
+            {
+                rewards = rewards.Select(n => new
+                {
+                    node = n.GetInstanceId(),
+                    enabled = Enabled(n),
+                    claimable = Enabled(n) && !NeedsPotionSlot(n),
+                    blockedReason = NeedsPotionSlot(n) ? "potion_inventory_full" : null,
+                    reward = SnapshotReward(n.Reward)
+                }).ToArray()
+            };
         }
         else if (scene is NChooseARelicSelection || sceneType == "NTreasureRoom")
         {
@@ -428,6 +443,8 @@ public sealed partial class GameAdapter
     {
         foreach (var button in Walk(scene).OfType<NClickableControl>().Where(Enabled))
         {
+            // Rewards use the native inventory and explicit availability checks above.
+            if (button is NRewardButton) continue;
             if (IsBlocked(button.GetType().Name) || IsBlocked(button.Name.ToString())) continue;
             string nodeSuffix = ":" + button.GetInstanceId();
             if (dispatch.Keys.Any(id => id.EndsWith(nodeSuffix, StringComparison.Ordinal))) continue;

@@ -332,7 +332,7 @@ public partial class AutopilotHost : Node
                     }
                     else { reflectionFailures++; Record("重新获取经验总结。"); }
                 }
-                catch (Exception ex) when (ex is ModelProtocolException or ProviderTransientException or TimeoutException)
+                catch (Exception ex) when (ex is ModelProtocolException or ProviderTransientException or ProviderConfigurationException or TimeoutException)
                 { reflectionFailures++; Record("经验更新：" + ex.GetType().Name + "；" + ex.Message); }
                 finally { if (reflectionReturned && !reflectionAccepted) reflectionProvider.DiscardLastDecision(); }
                 return;
@@ -442,11 +442,20 @@ public partial class AutopilotHost : Node
             if (modelDecisionReturned) provider.DiscardLastDecision();
             if (exiting || !enabled || requestGeneration != generation) return;
             if (retryToken != requestToken) { retryToken = requestToken; retryCount = 0; }
-            if (requestToken is not null && ++retryCount <= 2)
+            bool transient = ex is ProviderTransientException or TimeoutException;
+            if (requestToken is not null && ++retryCount <= (transient ? 5 : 2))
             {
-                Record($"{ModelFailureStage(ex)}，重试 {retryCount}/2：{ex.Message}");
-                SetStatus(ModelFailureStage(ex) + "，正在重试…");
-                nextPoll = clock + retryCount;
+                if ((!transient && retryCount == 1) || ex is ProviderTransientException { HttpStatusCode: >= 500 } && retryCount is 1 or 3)
+                {
+                    provider.ResetSession();
+                    decisionContext.Reset();
+                }
+                double retryDelay = transient ? Math.Min(30, 1 << retryCount) : retryCount;
+                if (ex is ProviderTransientException { RetryAfterSeconds: > 0 } retry)
+                    retryDelay = Math.Max(retryDelay, Math.Min(120, retry.RetryAfterSeconds.Value));
+                Record($"{ModelFailureStage(ex)}：{ex.Message}");
+                SetStatus($"{ModelFailureStage(ex)}，{Math.Ceiling(retryDelay):0} 秒后重试。");
+                nextPoll = clock + retryDelay;
             }
             else Pause(ModelFailureStage(ex) + "：" + ex.Message + " F9 重试。");
         }

@@ -17,6 +17,8 @@
 
 需要一个可用的 OpenAI 兼容模型服务；模型调用费用由所选服务商计收。支持 Responses 与 Chat Completions，地址可填写服务根地址或完整接口地址。
 
+如果 Claude 网关要求使用 Claude Code，请先安装 Windows 版 Claude Code。然后在 **F8 → 模型 → 展开连接设置** 中填写网关地址、API Key 和完整 Claude 模型 ID，选择 **Responses**，勾选「通过本机 Claude Code 连接」，再测试并保存。按网关账户的额度计费；也可直接使用支持 Responses 的 Claude 网关。
+
 ## 领航与显示
 
 | 按键 | 功能 |

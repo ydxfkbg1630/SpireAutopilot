@@ -10,6 +10,7 @@
     <Compile Include="Program.cs" />
     <Compile Include="../AutopilotConfig.cs" Link="AutopilotConfig.cs" />
     <Compile Include="../ProviderClient.cs" Link="ProviderClient.cs" />
+    <Compile Include="../ClaudeCodeTransport.cs" Link="ClaudeCodeTransport.cs" />
     <Compile Include="../DecisionContracts.cs" Link="DecisionContracts.cs" />
   <Compile Include="../AgentSession.cs" /></ItemGroup>
 </Project>

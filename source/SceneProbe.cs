@@ -9,6 +9,7 @@ using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Events.Custom.CrystalSphereEvent;
 using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Cards;
+using MegaCrit.Sts2.Core.Models.Potions;
 using MegaCrit.Sts2.Core.Nodes;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
 using MegaCrit.Sts2.Core.Random;
@@ -38,6 +39,7 @@ public static class SceneProbe
         int snapshot = 0;
         bool transformOnly = System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_TRANSFORM_ONLY") == "1";
         bool crystalOnly = System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_CRYSTAL_ONLY") == "1";
+        bool potionOnly = System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_POTION_FIXTURE") == "1";
         bool success = false;
         string? failure = null;
         try
@@ -54,6 +56,37 @@ public static class SceneProbe
             Assert("starting_event_and_native_map", observed.Contains("NEventRoom") && observed.Contains("NMapScreen"), new { scenes = observed.ToArray() });
             var run = RunManager.Instance.DebugOnlyGetState()!;
             Player player = LocalContext.GetMe(run)!;
+            if (potionOnly)
+            {
+                await Enter(RoomType.Shop, "potion_reward_fixture_room");
+                for (int i = 0; i < player.PotionSlots.Count; i++)
+                    await Complete(PotionCmd.TryToProcure<StrengthPotion>(player), "fill_potion_slot");
+                Assert("potion_slots_full", !player.HasOpenPotionSlots, new { slots = player.PotionSlots.Count });
+                var potionReward = new PotionReward(ModelDb.Potion<GamblersBrew>().ToMutable(), player);
+                Task offer = new RewardsSet(player).WithCustomRewards(new List<Reward> { potionReward }).Offer();
+                game.AllowNativeUiFallback = true;
+                var full = await Frame(f => f.Scene == "NRewardsScreen" && f.Actions.Any(a => a.Kind.StartsWith("discard_potion_", StringComparison.Ordinal)));
+                var potionContext = JsonSerializer.SerializeToElement(full.State).GetProperty("context").GetProperty("rewards")[0];
+                Assert("full_potion_reward_visible_but_unclaimable",
+                    full.Actions.All(a => a.Kind is not ("reward" or "native_ui")) &&
+                    potionContext.TryGetProperty("claimable", out var claimable) && !claimable.GetBoolean() &&
+                    potionContext.GetProperty("blockedReason").GetString() == "potion_inventory_full",
+                    new { full.Actions, potionContext });
+                await Execute(full, full.Actions.First(a => a.Kind.StartsWith("discard_potion_", StringComparison.Ordinal)));
+                var open = await Frame(f => f.Scene == "NRewardsScreen" && f.Actions.Any(a => a.Kind == "reward"));
+                Assert("potion_slot_open_after_native_discard", player.HasOpenPotionSlots && open.Token != full.Token,
+                    new { player.HasOpenPotionSlots });
+                await Execute(open, open.Actions.Single(a => a.Kind == "reward"));
+                await Wait(() => player.PotionSlots.Any(p => p is GamblersBrew), "native_potion_reward_claimed");
+                Assert("potion_claim_uses_native_inventory", player.PotionSlots.OfType<GamblersBrew>().Count() == 1,
+                    new { slots = player.PotionSlots.Select(p => p?.Id.ToString()).ToArray() });
+                if (!offer.IsCompleted)
+                    await DriveUntil(f => f.Scene != "NRewardsScreen", "close_potion_rewards", "continue", "confirm");
+                await Complete(offer, "potion_reward_offer_completed");
+                success = true;
+                stage = "potion_reward_completed";
+                return;
+            }
             if (crystalOnly)
             {
                 await VerifyCrystal(player);
@@ -202,7 +235,7 @@ public static class SceneProbe
         {
             Write("result.json", new { success, stage, failure, assertions, scenes = observed.ToArray(), actions = executed.Count, snapshots = snapshot,
                 elapsedSeconds = timer.Elapsed.TotalSeconds, shouldSave = false, scripted = true, providerApiCalls = 0,
-                scope = crystalOnly ? "Native disposable CrystalSphere: three sequential native clicks, observed fragments, compatibility inference, hidden-cell redaction and stale-action rejection." : transformOnly ? "Native disposable Ironclad fixture: fixed single/multiple and partial-range transformation selections, foreground confirmation, preview stability and native completion." : "Native disposable Fool run: initial event/map, merchant card purchase/removal, rest upgrade/confirm, gold/card reward, chest and first CrystalSphere cell. Scripted fixture setup is separate from player gameplay and model decisions." });
+                scope = potionOnly ? "Native potion reward: full slots, discard, claim and inventory verification." : crystalOnly ? "Native disposable CrystalSphere: three sequential native clicks, observed fragments, compatibility inference, hidden-cell redaction and stale-action rejection." : transformOnly ? "Native disposable Ironclad fixture: fixed single/multiple and partial-range transformation selections, foreground confirmation, preview stability and native completion." : "Native disposable Fool run: initial event/map, merchant card purchase/removal, rest upgrade/confirm, gold/card reward, chest and first CrystalSphere cell. Scripted fixture setup is separate from player gameplay and model decisions." });
             GD.Print($"[SpireAutopilot/SceneProbe] DONE success={success} assertions={assertions.Count}");
             host.GetTree().Quit(success ? 0 : 1);
         }

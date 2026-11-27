@@ -2,6 +2,7 @@
   "BaseUrl": "https://api.openai.com/v1",
   "Model": "your-model-id",
   "ApiMode": "Responses",
+  "UseClaudeCode": false,
   "PersistentSession": true,
   "SessionMaxTurns": 12,
   "SessionMaxInputBytes": 102400,
