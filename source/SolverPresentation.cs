@@ -23,6 +23,8 @@ public static class SolverPresentation
     private static bool originalVisible;
     private static volatile bool active;
     private static bool bound;
+    internal static bool UsesHotKernel(Assembly solver)
+        => solver.GetType("CombatSolver.HotSearch.HotSearchCoordinator", false) != null;
     private static readonly bool SuppressPresentation = System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_SOLVER_PRESENTATION") != "0";
     private static long suppressedUpdates;
     private static Func<bool>? searching;
@@ -69,7 +71,7 @@ public static class SolverPresentation
     {
         if (!bound) Bind(controller);
         active = true;
-        SolverThroughput.AnnounceOnce();
+        if (!UsesHotKernel(controller.Assembly)) SolverThroughput.AnnounceOnce();
         if (SuppressPresentation) HideOwnedLayer();
     }
 
@@ -125,9 +127,14 @@ public static class SolverPresentation
         deploying = controller.GetProperty("IsDeploying", Members)!.GetMethod!.CreateDelegate<Func<bool>>();
         BindWorkerCeiling(controller.Assembly);
         SolverProgressCapture.Install(Patcher, controller.Assembly);
-        SolverThroughput.Install(Patcher, controller.Assembly);
-        int isolatedSkins = SimulationVisualIsolation.Install(Patcher, controller.Assembly);
-        GD.Print($"[SpireAutopilot] SIMULATION_VISUAL_ISOLATION skin_hooks={isolatedSkins} scope=prediction_and_worker_threads");
+        // HotKernel operates on managed snapshots and owns its worker pacing and memory policy.
+        // The old engine's GC, yield and live-model animation hooks target symbols it removed.
+        if (!UsesHotKernel(controller.Assembly))
+        {
+            SolverThroughput.Install(Patcher, controller.Assembly);
+            int isolatedSkins = SimulationVisualIsolation.Install(Patcher, controller.Assembly);
+            GD.Print($"[SpireAutopilot] SIMULATION_VISUAL_ISOLATION skin_hooks={isolatedSkins} scope=prediction_and_worker_threads");
+        }
         SolverLightweightDiagnostics.Install(Patcher, controller.Assembly, IsOwnedCombat);
         // Enable diagnostics explicitly for A/B runs; ordinary games pay no per-frame sampling cost.
         if (System.Environment.GetEnvironmentVariable("SPIRE_AUTOPILOT_FRAME_PROFILE") is { Length: > 0 } profile)

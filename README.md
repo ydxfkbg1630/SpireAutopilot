@@ -8,9 +8,9 @@
 
 ## 开始使用
 
-当前适配游戏 **v0.113.0**、**尖塔领航兼容版 CombatSolver 0.51.10** 与 **RitsuLib 0.6.11+**，面向 Windows 单人游戏。战斗求解器支持 AutoAnthony 0.3.165 的动态生成卡牌。
+本版适配游戏 **v0.114.0**、**CombatSolver 1.0.3** 与 **RitsuLib 0.6.16+**，面向 Windows 原版单人游戏。东尼算法动态牌的兼容组合为游戏 v0.113.x、领航 0.5.13 与兼容版 CombatSolver 0.51.10。
 
-1. 订阅并启用[尖塔领航兼容版 CombatSolver](https://steamcommunity.com/sharedfiles/filedetails/?id=3844268417)、RitsuLib 和本模组。手动安装时，将发布包中的 `SpireAutopilot` 文件夹放入游戏的 `mods/`。
+1. 订阅并启用[战斗路线求解器 CombatSolver](https://steamcommunity.com/sharedfiles/filedetails/?id=3790899961)、[RitsuLib](https://steamcommunity.com/sharedfiles/filedetails/?id=3747602295) 和本模组。手动安装时，将发布包中的 `SpireAutopilot` 文件夹放入游戏的 `mods/`。
 2. 按 **F8** 打开设置，在「模型」页填写接口地址、模型 ID 和 API Key，选择服务支持的协议。
 3. 点击「测试连接」，连接成功后点击「保存设置」。
 4. 开始或继续单人游戏。领航启动时默认开启，可随时按 **F9** 暂停或继续。
@@ -41,7 +41,7 @@
 
 F8 →「求解器」集中管理 CombatSolver 参数，可按名称或分类查找。搜索时间、节点数、束宽与线程预算可按设备和等待偏好调整。
 
-点击「应用设置」后，参数随下一次搜索生效；「重新读取」加载已保存值，「恢复默认」恢复求解器默认值。运行时 GC 设置随下次启动生效。
+点击「应用设置」后，参数随下一次搜索生效；「重新读取」加载已保存值，「恢复默认」恢复求解器默认值。
 
 ## 数据与支持
 

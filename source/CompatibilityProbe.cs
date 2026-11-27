@@ -26,7 +26,10 @@ internal static class CompatibilityProbe
             hook.Invoke(null, args);
             int effective = (int)workers.GetValue(args[0])!;
             int untouched = (int)workers.GetValue(input)!;
-            foreach (string name in new[] { "Profile", "UseBeamWidthPortfolio", "UseNoveltyPortfolio", "UseEarlyTurnExploration" })
+            string[] qualityFields = SolverPresentation.UsesHotKernel(solver)
+                ? ["Profile", "MaxCombatSolveSeconds", "AdaptiveEscalationEnabled"]
+                : ["Profile", "UseBeamWidthPortfolio", "UseNoveltyPortfolio", "UseEarlyTurnExploration"];
+            foreach (string name in qualityFields)
             {
                 var property = snapshot.GetProperty(name)!;
                 if (!Equals(property.GetValue(input), property.GetValue(args[0])))

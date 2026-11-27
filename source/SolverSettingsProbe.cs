@@ -23,6 +23,7 @@ internal static class SolverSettingsProbe
             var fields = SolverSettingsAccess.GetFields();
             original = new(SolverSettingsAccess.ReadValues());
             settings = AppDomain.CurrentDomain.GetAssemblies().Select(a => a.GetType("CombatSolver.SolverSettings")).First(t => t != null)!;
+            bool hotKernel = SolverPresentation.UsesHotKernel(settings.Assembly);
             nativeOriginal = settings.GetProperty("Current", flags)!.GetValue(null)!;
             int eligible = nativeOriginal.GetType().GetProperties().Count(p => p.SetMethod != null
                 && !p.Name.StartsWith("Legacy") && p.Name != "PerformanceMigrationVersion");
@@ -43,7 +44,16 @@ internal static class SolverSettingsProbe
             var changed = SolverSettingsAccess.ReadValues();
             Check(Convert.ToInt32(changed["SearchMaxDegreeOfParallelism"]) == 7, "native_worker_save");
             Check(Equals(original["SearchTimeLimitSeconds"], changed["SearchTimeLimitSeconds"])
-                && Equals(original["UseNoveltyPortfolio"], changed["UseNoveltyPortfolio"]), "unmodified_search_quality_preserved");
+                && Equals(original[hotKernel ? "MaxCombatSolveSeconds" : "UseNoveltyPortfolio"],
+                    changed[hotKernel ? "MaxCombatSolveSeconds" : "UseNoveltyPortfolio"]), "unmodified_search_quality_preserved");
+            if (hotKernel)
+            {
+                var limit = fields.Single(f => f.Name == "MaxCombatSolveSeconds");
+                Check(limit.Minimum == 1 && limit.Maximum == 600 && limit.Step == 1, "native_limit_ui_range");
+                SolverSettingsAccess.Save(new Dictionary<string, object?> { [limit.Name] = 17 });
+                var capture = settings.GetMethod("Capture", flags)!.Invoke(null, null)!;
+                Check((int)capture.GetType().GetProperty(limit.Name)!.GetValue(capture)! == 17, "native_solve_limit_save");
+            }
             var persisted = JsonDocument.Parse(File.ReadAllText(Path.Combine(OS.GetUserDataDir(), "combat_solver_settings.json")));
             Check(persisted.RootElement.GetProperty("searchMaxDegreeOfParallelism").GetInt32() == 7, "native_file_persistence");
             bool rejected = false;
@@ -51,9 +61,13 @@ internal static class SolverSettingsProbe
             catch (Exception) { rejected = true; }
             Check(rejected && Equals(changed["SearchTimeLimitSeconds"], SolverSettingsAccess.ReadValues()["SearchTimeLimitSeconds"]), "native_reject_retains_configuration");
             var presetType = Nullable.GetUnderlyingType(fields.Single(f => f.Name == "PerformancePreset").Type)!;
-            SolverSettingsAccess.Save(new Dictionary<string, object?> { ["PerformancePreset"] = Enum.Parse(presetType, "High") });
+            var high = Enum.Parse(presetType, "High");
+            var expected = settings.GetMethod("ApplyPerformancePreset", flags)!.Invoke(null,
+                [settings.GetProperty("Current", flags)!.GetValue(null), high])!;
+            SolverSettingsAccess.Save(new Dictionary<string, object?> { ["PerformancePreset"] = high });
             changed = SolverSettingsAccess.ReadValues();
-            Check(Convert.ToInt32(changed["SearchBeamWidth"]) == 90 && Convert.ToInt32(changed["SearchMaxExpandedNodes"]) == 250000, "native_preset_applies_profile");
+            Check(Equals(changed["SearchBeamWidth"], expected.GetType().GetProperty("SearchBeamWidth")!.GetValue(expected))
+                && Equals(changed["SearchMaxExpandedNodes"], expected.GetType().GetProperty("SearchMaxExpandedNodes")!.GetValue(expected)), "native_preset_applies_profile");
             SolverSettingsAccess.Save(new Dictionary<string, object?> { ["SearchBeamWidth"] = 135 });
             Check(SolverSettingsAccess.ReadValues()["PerformancePreset"]!.ToString() == "Custom", "manual_budget_selects_custom");
             SolverSettingsAccess.Save(new Dictionary<string, object?> { ["SearchMaxDegreeOfParallelism"] = null });
@@ -74,6 +88,8 @@ internal static class SolverSettingsProbe
             filter.Text = "SearchBeamWidth"; filter.EmitSignal(LineEdit.SignalName.TextChanged, filter.Text);
             Check(Walk(panel).OfType<SpinBox>().Count() == 1, "search_filter_targets_parameter");
             var input = Walk(panel).OfType<SpinBox>().Single();
+            var custom = input.GetParent().GetChildren().OfType<CheckBox>().Single();
+            custom.ButtonPressed = true;
             input.Value = 137;
             Check(panel.CommitPending() && Convert.ToInt32(SolverSettingsAccess.ReadValues()["SearchBeamWidth"]) == 137, "ui_numeric_edit_and_apply");
             Check(original.All(pair => pair.Key == "SearchBeamWidth" || pair.Key == "PerformancePreset"

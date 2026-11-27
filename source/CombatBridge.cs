@@ -113,9 +113,10 @@ public sealed class CombatBridge
             Status = "请在战斗求解器设置中启用求解器";
             return false;
         }
-        if (AutoAnthonyIsLoaded() && _controller!.Assembly.GetType("CombatSolver.AutoAnthonyCardMirrors", false) == null)
+        if (!SolverPresentation.UsesHotKernel(_controller!.Assembly)
+            && AutoAnthonyIsLoaded() && _controller.Assembly.GetType("CombatSolver.AutoAnthonyCardMirrors", false) == null)
         {
-            Status = "AutoAnthony 动态卡牌需要尖塔领航兼容版 CombatSolver 0.51.10。";
+            Status = "东尼算法动态卡牌需要 CombatSolver 0.51.10 兼容版。";
             return false;
         }
 

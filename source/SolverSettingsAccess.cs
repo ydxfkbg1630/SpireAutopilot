@@ -123,6 +123,7 @@ internal static class SolverSettingsAccess
         var (label, group, help) = Labels.GetValueOrDefault(p.Name, (p.Name, "其他", "沿用求解器原生校验并保存。"));
         var (min, max, step) = p.Name switch
         {
+            "MaxCombatSolveSeconds" => (1d, 600d, 1d),
             "SearchTimeLimitSeconds" => (.1, 600d, .1),
             "SearchMaxDegreeOfParallelism" => (1d, 16d, 1d),
             "SearchBeamWidth" => (1d, 512d, 1d),
@@ -169,6 +170,7 @@ internal static class SolverSettingsAccess
         ["DeploymentFastMode"] = ("出牌速度", "战斗与执行", "跟随游戏、普通、快速或即时。"),
         ["DeploymentInterActionDelaySeconds"] = ("出牌动作间隔（秒）", "战斗与执行", "求解器执行动作之间的等待。"),
         ["PerformancePreset"] = ("性能与搜索预设", "搜索性能", "选择预设会通过原生接口同步时间、宽度、节点和分支。"),
+        ["MaxCombatSolveSeconds"] = ("战斗最大求解时长（秒）", "搜索性能", "新版求解器的整场搜索时长上限，范围 1–600 秒。"),
         ["SearchMaxDegreeOfParallelism"] = ("最大工作线程", "搜索性能", "范围 1–16；领航高级页的手动线程上限也参与限制。"),
         ["SearchTimeLimitSeconds"] = ("搜索软时间预算（秒）", "搜索性能", "范围 0.1–600；原子计算及收尾可能超出软预算。"),
         ["SearchBeamWidth"] = ("搜索束宽", "搜索性能", "每层保留的候选宽度；范围 1–512。"),
@@ -186,6 +188,7 @@ internal static class SolverSettingsAccess
         ["NoGcRegionBudgetGigabytes"] = ("暂缓回收预算（GB）", "内存管理", "范围 1–256；领航使用普通 GC，原生内存调度仍依据实际余量运行。"),
         ["PotionPolicy"] = ("总体药水策略", "药水与收益", "关闭、智能或至少用一瓶；该兼容项的持久化以原生版本为准。"),
         ["PotionDirectives"] = ("各槽位药水指令", "药水与收益", "JSON 数组；字段 Slot（从0开始）、PotionId、Directive。枚举参见下方结构说明。"),
+        ["PotionHpThresholdOverrides"] = ("药水损血阈值", "药水与收益", "按药水 ID 设置使用阈值。"),
         ["PredictPotionReward"] = ("预测药水奖励", "药水与收益", "原生战斗预测策略。"),
         ["RelicStrategyEnabled"] = ("启用遗物计数策略", "药水与收益", "按遗物计数目标优化路线。"),
         ["RelicCounterRules"] = ("遗物计数规则", "药水与收益", "JSON 数组；按原生 RelicCounterRule 结构编辑。"),

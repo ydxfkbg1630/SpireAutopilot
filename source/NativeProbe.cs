@@ -154,7 +154,7 @@ public static class NativeProbe
                             elapsedSeconds = timer.Elapsed.TotalSeconds
                         });
                     }
-                    if (fullRun) continue;
+                    if (fullRun || progressOnly || combatLimit > 0) continue;
                     success = scenes.Contains("NMapScreen")
                         && actions.Any(a => JsonSerializer.Serialize(a).Contains("\"kind\":\"travel\"", StringComparison.Ordinal));
                     if (!success) throw new InvalidOperationException("Combat started before a native map travel action was recorded.");

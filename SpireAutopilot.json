@@ -3,15 +3,15 @@
   "name": "尖塔全程领航",
   "author": "ydxfkbg1630",
   "description": "自动战斗与局外模型决策，每局更新统一经验总结。",
-  "version": "0.5.13",
+  "version": "0.5.14",
   "has_pck": false,
   "has_dll": true,
   "affects_gameplay": true,
-  "min_game_version": "0.113.0",
+  "min_game_version": "0.114.0",
   "dependencies": [
     {
-      "workshop_id": "3844268417",
-      "min_version": "0.51.10",
+      "workshop_id": "3790899961",
+      "min_version": "1.0.3",
       "id": "CombatSolver"
     }
   ]
